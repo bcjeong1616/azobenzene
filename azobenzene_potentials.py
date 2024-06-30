@@ -276,7 +276,7 @@ class PotentialParameterizer():
 
     def ljPair(self,nl):
         '''
-        PEO = -C-O-C-  = 
+        PEO = -C-O-C-  = s
         Benz= -C=C-    = 
         NN  = -N=N-     =
         '''
