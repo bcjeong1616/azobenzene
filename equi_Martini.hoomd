@@ -1,0 +1,234 @@
+print("this doesn't work yet. the potential parameterization hasn't been changed yet")
+# exit()
+
+import numpy as np
+import math
+import os, sys
+import hoomd
+import gsd.hoomd
+import argparse
+from pathlib import Path
+
+# script_path = Path(os.path.abspath(__file__))
+# script_parent_path = script_path.parent.absolute()
+
+# print(script_parent_path)
+exit()
+
+parser = argparse.ArgumentParser(description='Equilibrates an azobenzene system simulation using \
+                                 the Martini Model')
+
+non_opt = parser.add_argument_group('mandatory arguments')
+
+non_opt.add_argument('-i','--in', metavar='<gsd-file>',dest ='input_file', type=str,
+                required = True, help = 'input trajectory *.gsd file')
+
+# non_opt.add_argument('-AA','--AAmax', metavar='<int>',dest ='AAmax', type=int,
+#                 required = True, help = 'Maximum DPD parameter to try for like interactions')
+
+# non_opt.add_argument('-AB','--ABmax', metavar='<int>',dest ='ABmax', type=int,
+#                 required = True, help = 'Maximum DPD parameter to try for unlike interactions')
+
+opt = parser.add_argument_group('optional arguments')
+opt.add_argument('-o','--out', metavar='<gsd-file>',dest ='output_file', type=str,
+                required = False, help = 'output trajectory *.gsd file')
+opt.add_argument('-f','--frame', metavar='<int>',dest ='frame_start', type=int,
+                required = False, help = 'frame of the input trajectory to start from. \
+                If not given, assumes -1')
+
+args = parser.parse_args()
+input_gsd = Path(args.input_file)
+if (args.frame_start):
+    frame_start = args.frame_start
+else:
+    frame_start = -1
+if (args.output_file):
+    output_file = Path(args.output_file)
+else:
+    if (args.input_file.rfind('/') != -1):
+        output_file = f"eq_{args.input_file[(args.input_file.rfind('/')+1):]}"
+    else:
+        output_file = f"eq_{args.input_file}" \
+
+#Output
+if not os.path.exists("./eq/"):
+    os.makedirs("./eq/")
+out_string = output_file.replace('.gsd','')
+gsd_file='./eq/%s.gsd'%(out_string)
+log_file='./eq/%s.log'%(out_string)
+
+#-----------------------------------------------------------------------------
+#                              Parameterization
+#-----------------------------------------------------------------------------
+
+kT = 1
+# volume_fraction = 0.55
+
+# model parameters - masses are hardcoded in the polymerMelt Maker
+bPEOPEO = 0.9609
+bPEOBenz = 0.9609
+bBenzNN = 0.9609
+bPEOEndgroup = 0.9609
+sPEOPEO = 1.0
+sBenzBenz = 1.0
+sNNNN = 1.0
+sEndgroupEndgroup = 1.0
+sPEOBenz = 0.5*(sPEOPEO+sBenzBenz)
+sPEONN = 0.5*(sPEOPEO+sNNNN)
+sPEOEndgroup = 0.5*(sPEOPEO+sEndgroupEndgroup)
+sBenzNN = 0.5*(sBenzBenz+sNNNN)
+sBenzEndgroup = 0.5*(sBenzBenz+sEndgroupEndgroup)
+sNNEndgroup = 0.5*(sNNNN+sEndgroupEndgroup)
+
+ePEOPEO = 1.0
+eBenzBenz = 1.0
+eNNNN = 1.0
+ePEOBenz = 2*ePEOPEO*eBenzBenz/(ePEOPEO+eBenzBenz)
+ePEONN = 2*ePEOPEO*eNNNN/(ePEOPEO+eNNNN)
+eBenzNN = 2*eBenzBenz*eNNNN/(eBenzBenz+eNNNN)
+
+#-----------------------------------------------------------------------
+#                               Setup system
+#-----------------------------------------------------------------------
+
+try:
+    device = hoomd.device.GPU()
+except:
+    device = hoomd.device.CPU()
+device.notice_level = 2
+sim = hoomd.Simulation(device=device, seed=16)
+
+sim.create_state_from_gsd(filename=args.input_file,frame=frame_start)
+
+#-----------------------------------------------------------------------
+#                               Output
+#-----------------------------------------------------------------------
+
+thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
+sim.operations.computes.append(thermodynamic_properties)
+
+logger = hoomd.logging.Logger(categories=['scalar'])
+logger.add(sim, quantities=['timestep'])
+logger.add(thermodynamic_properties, quantities=['kinetic_temperature','pressure','kinetic_energy','potential_energy','volume'])
+# table_stdout = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger)
+table_file = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger, output=open(log_file,'a'))
+# sim.operations.writers.append(table_stdout)
+sim.operations.writers.append(table_file)
+
+# with gsd.hoomd.open(name=gsd_file, mode='w') as f:
+#     f.append(frame)
+gsd_writer = hoomd.write.GSD(filename=gsd_file,
+                                    trigger=hoomd.trigger.Periodic(10000),
+                                    dynamic=['property','momentum','topology','attribute'],
+                                    mode='wb')
+sim.operations.writers.append(gsd_writer)
+
+#-----------------------------------------------------------------------
+#                        Particle interactions
+#-----------------------------------------------------------------------
+
+nl = hoomd.md.nlist.Cell(buffer=0.4)
+interactions = azobenzene_potentials.PotentialParameterizer()
+lj = interactions.ljPair(nl=nl)
+harmonicBonds = interactions.harmonicBonds()
+angles = interactions.angles()
+
+'''
+# these are not standard DPD parameters!
+dpd = hoomd.md.pair.DPD(nlist=nl, kT=kT, default_r_cut=sPEOPEO)
+dpd.params[('PEO','PEO')] =         dict(A=15,gamma=4.5)
+dpd.params[('PEO','Benz')] =        dict(A=15,gamma=4.5)
+dpd.params[('PEO','NN')] =          dict(A=15,gamma=4.5)
+dpd.params[('PEO','Endgroup')] =    dict(A=15,gamma=4.5)
+dpd.params[('Benz','Benz')] =       dict(A=15,gamma=4.5)
+dpd.params[('Benz','NN')] =         dict(A=15,gamma=4.5)
+dpd.params[('Benz','Endgroup')] =   dict(A=15,gamma=4.5)
+dpd.params[('NN','NN')] =           dict(A=15,gamma=4.5)
+dpd.params[('NN','Endgroup')] =     dict(A=15,gamma=4.5)
+dpd.params[('Endgroup','Endgroup')] =     dict(A=15,gamma=4.5)
+dpd.r_cut[('PEO','PEO')] =   sPEOPEO
+dpd.r_cut[('PEO','Benz')] =  sPEOBenz
+dpd.r_cut[('PEO','NN')] =    sPEONN
+dpd.r_cut[('Benz','Benz')] = sBenzBenz
+dpd.r_cut[('Benz','NN')] =   sBenzNN
+dpd.r_cut[('NN','NN')] =     sNNNN
+dpd.r_cut[('Benz','Endgroup')] = sBenzEndgroup
+dpd.r_cut[('PEO','Endgroup')] = sPEOEndgroup
+dpd.r_cut[('NN','Endgroup')] = sNNEndgroup
+dpd.r_cut[('Endgroup','Endgroup')] = sEndgroupEndgroup
+'''
+
+#Lennard-Jones pair interaction
+lj.params[('Benz','Benz')] =   dict(epsilon=eBenzBenz,sigma=sBenzBenz)
+lj.params[('Benz','NN')] =     dict(epsilon=eBenzNN,sigma=sBenzNN)
+lj.params[('NN','NN')] =       dict(epsilon=eNNNN,sigma=sNNNN)
+lj.r_cut[('PEO','PEO')] =   3.0*sPEOPEO
+lj.r_cut[('PEO','Benz')] =  3.0*sPEOBenz
+lj.r_cut[('PEO','NN')] =    3.0*sPEONN
+lj.r_cut[('Benz','Benz')] = 3.0*sBenzBenz
+lj.r_cut[('Benz','NN')] =   3.0*sBenzNN
+lj.r_cut[('NN','NN')] =     3.0*sNNNN
+lj.params[('Endgroup',['PEO','Benz','NN','Endgroup'])] =     dict(epsilon=ePEOPEO,sigma=sPEOPEO)
+lj.r_cut[('Endgroup',['PEO','Benz','NN','Endgroup'])] =     3.0*sNNNN
+
+#harmonic bonds
+harmonic = hoomd.md.bond.Harmonic()
+harmonic.params['PEOPEO'] =     dict(k=100.0, r0=sPEOPEO)
+harmonic.params['BenzPEO'] =    dict(k=100.0, r0=sPEOBenz)
+harmonic.params['NNPEO'] =      dict(k=100.0, r0=sPEONN)
+harmonic.params['BenzBenz'] =   dict(k=100.0, r0=sBenzBenz)
+harmonic.params['BenzNN'] =     dict(k=100.0, r0=sBenzNN)
+harmonic.params['NNNN'] =       dict(k=100.0, r0=sNNNN)
+harmonic.params['EndgroupPEO'] =       dict(k=100.0, r0=sNNNN)
+harmonic.params['BenzEndgroup'] =       dict(k=100.0, r0=sNNNN)
+harmonic.params['EndgroupNN'] =       dict(k=100.0, r0=sNNNN)
+harmonic.params['EndgroupEndgroup'] =       dict(k=100.0, r0=sNNNN)
+
+
+# FENE bonds
+fene = hoomd.md.bond.FENEWCA()
+fene.params['PEOPEO'] =     dict(k=30,r0=1.5*sPEOPEO, epsilon=ePEOPEO, sigma=sPEOPEO, delta=0.0)
+fene.params['BenzPEO'] =    dict(k=30,r0=1.5*sPEOBenz,epsilon=ePEOBenz,sigma=sPEOBenz,delta=0.0)
+fene.params['NNPEO'] =      dict(k=30,r0=1.5*sPEONN, epsilon=ePEONN, sigma=sPEONN, delta=0.0)
+fene.params['BenzBenz'] =   dict(k=30,r0=1.5*sBenzBenz,epsilon=eBenzBenz,sigma=sBenzBenz,delta=0.0)
+fene.params['BenzNN'] =     dict(k=30,r0=1.5*sBenzNN, epsilon=eBenzNN, sigma=sBenzNN, delta=0.0)
+fene.params['NNNN'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+fene.params['EndgroupPEO'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+fene.params['BenzEndgroup'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+fene.params['EndgroupNN'] =      dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+fene.params['EndgroupEndgroup'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+
+#angles
+angle = hoomd.md.angle.CosineSquared()
+angle.params['transAzo'] = dict(k=100.0,t0=math.pi)
+angle.params['cisAzo'] = dict(k=100.0, t0=2*math.pi/6)
+angle.params['polymer'] = dict(k=0.0, t0=math.pi)
+
+#Dihedrals parameterization will go here
+
+
+
+#-----------------------------------------------------------------------
+#                                Run
+#-----------------------------------------------------------------------
+dt = 0.005
+P = 0
+kT = 1
+tau = dt*100
+# timestep= 0.04 is from original Groot,Warren DPD publication. They used density=3, our density is much lower
+
+integrator = hoomd.md.Integrator(dt=dt)
+
+npt = hoomd.md.methods.ConstantPressure(filter=hoomd.filter.All(),S=P,
+                                        tauS=1000*dt,couple="xyz",
+                                        thermostat=hoomd.md.methods.thermostats.MTTK(kT=kT,tau=tau))
+
+integrator.methods.append(npt)
+integrator.forces = [lj,fene,angle]
+
+sim.operations.integrator = integrator
+
+sim.run(5e5+1)
+
+# hoomd.write.GSD.write(state=sim.state,mode='wb',filename=gsd_file)
+# print("writing gsd file to:",gsd_file)

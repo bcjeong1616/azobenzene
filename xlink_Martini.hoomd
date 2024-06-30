@@ -1,0 +1,293 @@
+import numpy as np
+import math
+import os, sys
+import hoomd
+import gsd.hoomd
+# both scripts have to be in same folder for this to work
+from random_polymerMelt_maker import RandomPolymerMaker
+import argparse
+from pathlib import Path
+import azobenzene_potentials
+import freud
+
+parser = argparse.ArgumentParser(description='Performs npt uniaxial deformation of a given system')
+
+non_opt = parser.add_argument_group('mandatory arguments')
+
+non_opt.add_argument('-i','--in', metavar='<gsd-file>',dest ='input_file', type=str,
+                required = True, help = 'input trajectory *.gsd file')
+
+# non_opt.add_argument('-AA','--AAmax', metavar='<int>',dest ='AAmax', type=int,
+#                 required = True, help = 'Maximum DPD parameter to try for like interactions')
+
+# non_opt.add_argument('-AB','--ABmax', metavar='<int>',dest ='ABmax', type=int,
+#                 required = True, help = 'Maximum DPD parameter to try for unlike interactions')
+
+opt = parser.add_argument_group('optional arguments')
+opt.add_argument('-o','--out', metavar='<gsd-file>',dest ='output_file', type=str,
+                required = False, help = 'output trajectory *.gsd file')
+
+args = parser.parse_args()
+input_gsd = Path(args.input_file)
+if (args.output_file):
+    output_file = Path(args.output_file)
+else:
+    if (args.input_file.rfind('/') != -1):
+        output_file = f"xlinked_{args.input_file[(args.input_file.rfind('/')+1):]}"
+    else:
+        output_file = f"xlinked_{args.input_file}" \
+
+#Output
+if not os.path.exists("./xlinked/"):
+    os.makedirs("./xlinked/")
+out_string = str(output_file).replace('.gsd','')
+gsd_file='./xlinked/%s.gsd'%(out_string)
+log_file='./xlinked/%s.log'%(out_string)
+
+#-----------------------------------------------------------------------------
+#                              Parameterization
+#-----------------------------------------------------------------------------
+
+kT = 1
+# volume_fraction = 0.55
+
+# model parameters - masses are hardcoded in the polymerMelt Maker
+bPEOPEO = 0.9609
+bPEOBenz = 0.9609
+bBenzNN = 0.9609
+bPEOEndgroup = 0.9609
+sPEOPEO = 1.0
+sBenzBenz = 1.0
+sNNNN = 1.0
+sEndgroupEndgroup = 1.0
+sPEOBenz = 0.5*(sPEOPEO+sBenzBenz)
+sPEONN = 0.5*(sPEOPEO+sNNNN)
+sPEOEndgroup = 0.5*(sPEOPEO+sEndgroupEndgroup)
+sBenzNN = 0.5*(sBenzBenz+sNNNN)
+sBenzEndgroup = 0.5*(sBenzBenz+sEndgroupEndgroup)
+sNNEndgroup = 0.5*(sNNNN+sEndgroupEndgroup)
+
+ePEOPEO = 1.0
+eBenzBenz = 1.0
+eNNNN = 1.0
+ePEOBenz = 2*ePEOPEO*eBenzBenz/(ePEOPEO+eBenzBenz)
+ePEONN = 2*ePEOPEO*eNNNN/(ePEOPEO+eNNNN)
+eBenzNN = 2*eBenzBenz*eNNNN/(eBenzBenz+eNNNN)
+
+#-----------------------------------------------------------------------
+#                       Crosslink Random neighbors
+#-----------------------------------------------------------------------
+
+with gsd.hoomd.open(name=input_gsd, mode='r') as f:
+    frame = f[-1]
+    f.close()
+
+print(frame.bonds.group)
+
+
+# ids = np.arange(len(frame.particles.rtag))
+# rtags = frame.particles.rtag[ids]
+# print(rtags)
+# print(frame.particles.rtag)
+# exit()
+
+ids = np.arange(frame.particles.N)
+candidate_typeid = np.where(np.array(frame.particles.types) == 'PEO')[0][0]
+candidate_ids = ids[frame.particles.typeid == candidate_typeid]
+candidate_pos = frame.particles.position[candidate_ids]
+
+#Use Freud to find the ids of particles that are near each other
+rcut_neigh = 1.1
+box = freud.Box.from_box(frame.configuration.box)
+aq = freud.locality.AABBQuery(box, candidate_pos)
+nlist = aq.query(candidate_pos, {'r_max': rcut_neigh, 'exclude_ii':True}).toNeighborList()
+all_pairs = nlist[:]
+
+#Translate the nlist indices back to indices for the whole simulation
+actual_candidate_ids = candidate_ids[all_pairs]
+
+#Filter out any pairs that already have a bond between them
+nonbonded_actual_candidate_ids = np.empty(shape=2)
+for candidate_id in actual_candidate_ids:
+    if candidate_id[1]-candidate_id[0] != 1:
+        nonbonded_actual_candidate_ids = np.append(nonbonded_actual_candidate_ids,candidate_id)
+'''
+indices_to_delete = []
+for i,candidate_bond in enumerate(actual_candidate_ids):
+    if candidate_bond.tolist() in frame.bonds.group.tolist():
+        indices_to_delete.append(i)
+    print('filtering', i,'/',len(actual_candidate_ids))
+print(indices_to_delete)
+actual_candidate_ids = np.delete(actual_candidate_ids,indices_to_delete,axis=0)
+'''
+
+try:
+    xlink_bond_typeid = frame.bonds.types.index('Xlink')
+except ValueError:
+    xlink_bond_typeid = len(frame.bonds.types)
+    frame.bonds.types.append('Xlink')
+
+n_xlink_target = 200
+n_xlink_actual = min(n_xlink_target, len(actual_candidate_ids))
+pair_idxs = np.random.choice(len(actual_candidate_ids),size=n_xlink_actual,replace=False)
+'''
+for pair_idx in pair_idxs:
+    new_pair_idx = pair_idx
+    while actual_candidate_ids[pair_idx][:].tolist() in frame.bonds.group.tolist() or \
+                np.count():
+        new_pair_idx = np.random.choice(len(actual_candidate_ids))
+        while new_pair_idx
+'''
+pairs = actual_candidate_ids[pair_idxs][:]
+counter = 0
+for pair in pairs:
+    frame.bonds.group = np.append(frame.bonds.group,[pair[0],pair[1]])
+    frame.bonds.typeid = np.append(frame.bonds.typeid,xlink_bond_typeid)
+    frame.bonds.N = frame.bonds.N + 1
+    counter += 1
+    if counter % 5 == 0:
+        print('Crosslinking progress: ',counter, '/',n_xlink_actual)
+print(frame.bonds.group)
+frame.bonds.group = np.reshape(frame.bonds.group,newshape=(-1,2))
+print(frame.bonds.group)
+
+'''
+xlink_bond_typeid = np.where(np.array(frame.bonds.types) == 'Xlink')[0][0]
+n_xlink_target = 20
+dummy_bond_ptr = np.argwhere(frame.bonds.typeid==len(frame.bonds.types)-1)[0]
+print(dummy_bond_ptr)
+for i in range(max(n_xlink_target, len(all_pairs))):
+    frame.bonds.group[dummy_bond_ptr][0] = all_pairs[i][0]
+    frame.bonds.group[dummy_bond_ptr][1] = all_pairs[i][1]
+    frame.bonds.typeid[dummy_bond_ptr] = xlink_bond_typeid
+    dummy_bond_ptr += 1
+'''
+
+'''
+transID = np.where(np.array(frame.angles.types) == 'transAzo')[0][0]
+cisID = np.where(np.array(frame.angles.types) == 'cisAzo')[0][0]
+cisID_arr = [cisID]*len(frame.angles.typeid)
+frame.angles.typeid[np.where(frame.angles.typeid == transID)] = cisID
+'''
+
+#-----------------------------------------------------------------------
+#                               Setup system
+#-----------------------------------------------------------------------
+
+try:
+    device = hoomd.device.GPU()
+except:
+    device = hoomd.device.CPU()
+device.notice_level = 2
+sim = hoomd.Simulation(device=device, seed=16)
+
+# sim.create_state_from_gsd(filename=gsd_file)
+sim.create_state_from_snapshot(frame)
+
+#-----------------------------------------------------------------------
+#                               Output
+#-----------------------------------------------------------------------
+
+thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
+sim.operations.computes.append(thermodynamic_properties)
+
+logger = hoomd.logging.Logger(categories=['scalar'])
+logger.add(sim, quantities=['timestep'])
+logger.add(thermodynamic_properties, quantities=['kinetic_temperature','pressure','kinetic_energy','potential_energy','volume'])
+# table_stdout = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger)
+table_file = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger, output=open(log_file,'a'))
+# sim.operations.writers.append(table_stdout)
+sim.operations.writers.append(table_file)
+
+with gsd.hoomd.open(name=gsd_file, mode='w') as f:
+    f.append(frame)
+# gsd_writer = hoomd.write.GSD(filename=gsd_file,
+#                                     trigger=hoomd.trigger.Periodic(10000),
+#                                     dynamic=['property','momentum','topology','attribute'],
+#                                     mode='wb')
+# sim.operations.writers.append(gsd_writer)
+
+#-----------------------------------------------------------------------
+#                        Particle interactions
+#-----------------------------------------------------------------------
+
+nl = hoomd.md.nlist.Cell(buffer=0.4)
+
+interactions = azobenzene_potentials.PotentialParameterizer()
+lj = interactions.ljPair(nl=nl)
+harmonicBonds = interactions.harmonicBonds()
+angles = interactions.angles()
+
+# #Lennard-Jones pair interactions
+# lj = hoomd.md.pair.LJ(nlist=nl,mode='xplor')
+# lj.params[('PEO','PEO')] =     dict(epsilon=ePEOPEO,sigma=sPEOPEO)
+# lj.params[('PEO','Benz')] =    dict(epsilon=ePEOBenz,sigma=sPEOBenz)
+# lj.params[('PEO','NN')] =      dict(epsilon=ePEONN,sigma=sPEONN)
+# lj.params[('Benz','Benz')] =   dict(epsilon=eBenzBenz,sigma=sBenzBenz)
+# lj.params[('Benz','NN')] =     dict(epsilon=eBenzNN,sigma=sBenzNN)
+# lj.params[('NN','NN')] =       dict(epsilon=eNNNN,sigma=sNNNN)
+# lj.r_cut[('PEO','PEO')] =   3.0*sPEOPEO
+# lj.r_cut[('PEO','Benz')] =  3.0*sPEOBenz
+# lj.r_cut[('PEO','NN')] =    3.0*sPEONN
+# lj.r_cut[('Benz','Benz')] = 3.0*sBenzBenz
+# lj.r_cut[('Benz','NN')] =   3.0*sBenzNN
+# lj.r_cut[('NN','NN')] =     3.0*sNNNN
+# lj.params[('Endgroup',['PEO','Benz','NN','Endgroup'])] =     dict(epsilon=ePEOPEO,sigma=sPEOPEO)
+# lj.r_cut[('Endgroup',['PEO','Benz','NN','Endgroup'])] =     3.0*sNNNN
+
+# #harmonic bonds
+# harmonic = hoomd.md.bond.Harmonic()
+# harmonic.params['PEOPEO'] =     dict(k=100.0, r0=sPEOPEO)
+# harmonic.params['BenzPEO'] =    dict(k=100.0, r0=sPEOBenz)
+# harmonic.params['NNPEO'] =      dict(k=100.0, r0=sPEONN)
+# harmonic.params['BenzBenz'] =   dict(k=100.0, r0=sBenzBenz)
+# harmonic.params['BenzNN'] =     dict(k=100.0, r0=sBenzNN)
+# harmonic.params['NNNN'] =       dict(k=100.0, r0=sNNNN)
+# harmonic.params['EndgroupPEO'] =       dict(k=100.0, r0=sNNNN)
+# harmonic.params['BenzEndgroup'] =       dict(k=100.0, r0=sNNNN)
+# harmonic.params['EndgroupNN'] =       dict(k=100.0, r0=sNNNN)
+# harmonic.params['EndgroupEndgroup'] =       dict(k=100.0, r0=sNNNN)
+
+
+# # FENE bonds
+# fene = hoomd.md.bond.FENEWCA()
+# fene.params['PEOPEO'] =     dict(k=30,r0=1.5*sPEOPEO, epsilon=ePEOPEO, sigma=sPEOPEO, delta=0.0)
+# fene.params['BenzPEO'] =    dict(k=30,r0=1.5*sPEOBenz,epsilon=ePEOBenz,sigma=sPEOBenz,delta=0.0)
+# fene.params['NNPEO'] =      dict(k=30,r0=1.5*sPEONN, epsilon=ePEONN, sigma=sPEONN, delta=0.0)
+# fene.params['BenzBenz'] =   dict(k=30,r0=1.5*sBenzBenz,epsilon=eBenzBenz,sigma=sBenzBenz,delta=0.0)
+# fene.params['BenzNN'] =     dict(k=30,r0=1.5*sBenzNN, epsilon=eBenzNN, sigma=sBenzNN, delta=0.0)
+# fene.params['NNNN'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+# fene.params['EndgroupPEO'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+# fene.params['BenzEndgroup'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+# fene.params['EndgroupNN'] =      dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+# fene.params['EndgroupEndgroup'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
+
+# #angles
+# angle = hoomd.md.angle.CosineSquared()
+# angle.params['transAzo'] = dict(k=100.0,t0=math.pi)
+# angle.params['cisAzo'] = dict(k=100.0, t0=2*math.pi/6)
+# angle.params['polymer'] = dict(k=0.0, t0=math.pi)
+
+#Dihedrals parameterization will go here
+
+#-----------------------------------------------------------------------
+#                                Run
+#-----------------------------------------------------------------------
+# timestep= 0.04 is from original Groot,Warren DPD publication. They used density=3, our density is much lower
+
+nve = hoomd.md.methods.ConstantVolume(filter=hoomd.filter.All())
+
+integrator = hoomd.md.Integrator(dt=0.005)
+
+langevin = hoomd.md.methods.Langevin(filter=hoomd.filter.All(),kT=kT,default_gamma=0.1)
+
+integrator.methods.append(langevin)
+integrator.forces = [lj,harmonicBonds,angles]
+
+sim.operations.integrator = integrator
+sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(),kT=kT)
+
+sim.run(1e5)
+
+hoomd.write.GSD.write(state=sim.state,mode='wb',filename=gsd_file)
+print("writing gsd file to:",gsd_file)
