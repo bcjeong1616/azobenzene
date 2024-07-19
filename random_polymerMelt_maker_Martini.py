@@ -6,6 +6,7 @@ import os,sys
 import gsd.hoomd
 import hoomd
 import sys, math
+import csv
 
 class RandomPolymerMaker():
 
@@ -188,6 +189,40 @@ class RandomPolymerMaker():
             self.positions = np.vstack((self.positions, r))
         else:
             self.positions = r
+
+    def add_azobenzene(self,origin,orientation):
+        """
+        Read a csv with information about beads present in a molecule and
+        translate it into information python can read
+
+        Args:
+        molecule_beads (string): string detailing csv with molecule information.
+        current_index (list of Int): current_index[0] = bead index. current_index[1] = bond index. current_index[2] = angle_index
+
+
+        Returns:
+        idx (list of ints): bead index
+        bead_types (list of strings): bead types (i.e. 'Q1', 'W')
+        positions (tuple of (x,y,z)): tuple containing relative x,y,z positions for the initialization of a molecule
+
+        """
+        idx = []
+        bead_types = []
+        positions = []
+        charges = []
+        with open('azobenzene.csv', newline="") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if row[0] != "Index":
+                    idx.append(str(int(row[0]) + current_index[0]))
+                    bead_types.append(row[1])
+                    positions.append([float(row[2]), float(row[3]), float(row[4])])
+                    if "Q" in row[1]:
+                        charges.append(row[5])
+                    else:
+                        charges.append(None)
+        return idx, bead_types, positions, charges
+
 
     def wrap_pbc(self,x):
         box = np.array([self.Lx,self.Ly,self.Lz])

@@ -276,9 +276,17 @@ class PotentialParameterizer():
 
     def ljPair(self,nl):
         '''
-        PEO = -C-O-C-  = s
-        Benz= -C=C-    = 
-        NN  = -N=N-     =
+        PEO = -C-O-C-  = sN3r
+        Benz= -C=C-    = TC5
+        BenzEnd = -C=C-O = ??????? Necessary?
+        NN  = -N=N-     = TN3r (Not my fav)
+        End = -C-OH     = TP1
+        PE  = -C-C-C-   = S
+        ILCat0
+        ILCat1 = 
+        ILAn0 = 
+        ILAn1 = 
+
         '''
 
         #Lennard-Jones pair interactions
