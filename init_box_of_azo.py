@@ -191,23 +191,52 @@ def main():
     sim.operations.integrator = fire
     sim.run(1e5)
 
-    print("FIRE done")
+    print("FIRE 1 done")
+
+    for A in np.linspace(10,400,5):
+        print("A: ",A)
+        dpd.params[(frame.particles.types,frame.particles.types)] = dict(A=A, gamma=4.5)
+        fire.forces = [dpd, bond_harmonic, angle_forces]
+        sim.operations.integrator = fire
+        sim.run(1e5)
 
     lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid = force_fields.forces_from_gsd(
         path, "init.gsd"
     )
+    mttk = hoomd.md.methods.thermostats.MTTK(kT = 1.5, tau = 1)
+    cv = hoomd.md.methods.ConstantVolume(filter = hoomd.filter.All(),thermostat = mttk)
     integratorNVT = hoomd.md.Integrator(
         dt=0.02,
         methods=[cv],
         forces=[lj, bond_harmonic, angle_forces],
     )
     sim.operations.integrator = integratorNVT
-    sim.run(1e7)
-    hoomd.write.GSD.write(sim.state,
-        filename=path + "traj.gsd",
-        filter=hoomd.filter.All(),
-        mode="wb",
-    )    
+
+    #-----------------------------------------------------------------------
+    #                               Output
+    #-----------------------------------------------------------------------
+
+    gsd_file = path + 'traj.gsd'
+    log_file = path + 'traj.log'
+
+    thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
+    sim.operations.computes.append(thermodynamic_properties)
+
+    logger = hoomd.logging.Logger(categories=['scalar'])
+    logger.add(sim, quantities=['timestep'])
+    logger.add(thermodynamic_properties, quantities=['kinetic_temperature','pressure','kinetic_energy','potential_energy','volume'])
+    # table_stdout = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger)
+    table_file = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger, output=open(log_file,'a'))
+    # sim.operations.writers.append(table_stdout)
+    sim.operations.writers.append(table_file)
+
+    gsd_writer = hoomd.write.GSD(filename=gsd_file,
+                                        trigger=hoomd.trigger.Periodic(1000),
+                                        dynamic=['property','momentum','topology','attribute'],
+                                        mode='wb')
+    sim.operations.writers.append(gsd_writer)
+
+    sim.run(4e6)
 
 
 
