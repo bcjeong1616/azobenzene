@@ -6,7 +6,30 @@ import gsd.hoomd
 # both scripts have to be in same folder for this to work
 from random_polymerMelt_maker_Martini import RandomPolymerMaker
 import argparse
+"""
 import azobenzene_potentials
+"""
+sys.path.append('/home/bj21/programs/')
+from martini3 import force_fields
+import datetime
+
+class Status:
+    def __init__(self, simulation):
+        self.simulation = simulation
+
+    @property
+    def seconds_remaining(self):
+        try:
+            return (
+                self.simulation.final_timestep - self.simulation.timestep
+            ) / self.simulation.tps
+        except ZeroDivisionError:
+            return 0
+
+    @property
+    def etr(self):
+        return str(datetime.timedelta(seconds=self.seconds_remaining))
+
 
 # parser = argparse.ArgumentParser(description='Initializes a lamellar morphology triblock melt system')
 
@@ -74,12 +97,8 @@ print("Number of polymers %d in box %2.1f x  %2.1f x %2.1f"%(nChains,Lx,Ly,Lz))
 #-----------------------------------------------------------------------
 #                               Setup system
 #-----------------------------------------------------------------------
+dt = 0.005
 
-#Output
-if not os.path.exists("./init/"):
-    os.makedirs("./init/")
-gsd_file='./init/init_lam_nPEO_%1.0f_nAzo_%1.0f_L_%1.1f_%1.1f_%1.1f_Martini.gsd'%(nPEO,nAzo,Lx,Ly,Lz)
-log_file='./init/init_lam_nPEO_%1.0f_nAzo_%1.0f_L_%1.1f_%1.1f_%1.1f_Martini.log'%(nPEO,nAzo,Lx,Ly,Lz)
 
 #Make system
 maker = RandomPolymerMaker(Ntotal=nChains,nPEO=nPEO,nAzo=nAzo,box=[Lx,Ly,Lz])
@@ -96,14 +115,24 @@ sim = hoomd.Simulation(device=device, seed=16)
 
 sim.create_state_from_gsd(filename=gsd_file)
 
+integrator = hoomd.md.Integrator(dt=dt)
+
 #-----------------------------------------------------------------------
 #                               Output
 #-----------------------------------------------------------------------
+#Output
+if not os.path.exists("./init/"):
+    os.makedirs("./init/")
+gsd_file='./init/init_lam_nPEO_%1.0f_nAzo_%1.0f_L_%1.1f_%1.1f_%1.1f_Martini.gsd'%(nPEO,nAzo,Lx,Ly,Lz)
+log_file='./init/init_lam_nPEO_%1.0f_nAzo_%1.0f_L_%1.1f_%1.1f_%1.1f_Martini.log'%(nPEO,nAzo,Lx,Ly,Lz)
+
+status = Status(sim)
 
 thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
 sim.operations.computes.append(thermodynamic_properties)
 
-logger = hoomd.logging.Logger(categories=['scalar'])
+logger = hoomd.logging.Logger(categories=['scalar','string'])
+logger[("Status", "etr")] = (status, "etr", "string")
 logger.add(sim, quantities=['timestep'])
 logger.add(thermodynamic_properties, quantities=['kinetic_temperature','pressure','kinetic_energy','potential_energy','volume'])
 # table_stdout = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger)
@@ -121,34 +150,45 @@ sim.operations.writers.append(table_file)
 #                        Particle interactions
 #-----------------------------------------------------------------------
 
-nl = hoomd.md.nlist.Cell(buffer=0.4)
-# these are not standard DPD parameters!
-dpd = hoomd.md.pair.DPD(nlist=nl, kT=kT, default_r_cut=sPEOPEO)
-dpd.params[('PEO','PEO')] =         dict(A=200,gamma=4.5)
-dpd.params[('PEO','Benz')] =        dict(A=200,gamma=4.5)
-dpd.params[('PEO','NN')] =          dict(A=200,gamma=4.5)
-dpd.params[('PEO','Endgroup')] =    dict(A=200,gamma=4.5)
-dpd.params[('Benz','Benz')] =       dict(A=200,gamma=4.5)
-dpd.params[('Benz','NN')] =         dict(A=200,gamma=4.5)
-dpd.params[('Benz','Endgroup')] =   dict(A=200,gamma=4.5)
-dpd.params[('NN','NN')] =           dict(A=200,gamma=4.5)
-dpd.params[('NN','Endgroup')] =     dict(A=200,gamma=4.5)
-dpd.params[('Endgroup','Endgroup')] =     dict(A=200,gamma=4.5)
-dpd.r_cut[('PEO','PEO')] =   sPEOPEO
-dpd.r_cut[('PEO','Benz')] =  sPEOBenz
-dpd.r_cut[('PEO','NN')] =    sPEONN
-dpd.r_cut[('PEO','Endgroup')] = sPEOEndgroup
-dpd.r_cut[('Benz','Benz')] = sBenzBenz
-dpd.r_cut[('Benz','NN')] =   sBenzNN
-dpd.r_cut[('Benz','Endgroup')] = sBenzEndgroup
-dpd.r_cut[('NN','NN')] =     sNNNN
-dpd.r_cut[('NN','Endgroup')] = sNNEndgroup
-dpd.r_cut[('Endgroup','Endgroup')] = sEndgroupEndgroup
+lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid = force_fields.forces_from_gsd(
+        str(path)+'/', str(input_gsd.name)
+    )
 
-interactions = azobenzene_potentials.PotentialParameterizer()
-lj = interactions.ljPair(nl=nl)
-harmonicBonds = interactions.harmonicBonds()
-angles = interactions.angles()
+# these are not standard DPD parameters!
+nl = hoomd.md.nlist.Cell(buffer=0.4)
+dpd = hoomd.md.pair.DPD(nlist=nl, kT=kT, default_r_cut=sPEOPEO)
+dpd.params[(frame.particles.types,frame.particles.types)] = dict(A=10,gamma=4.5)
+
+integrator.forces = [lj,bond_harmonic,angle_forces]
+
+# nl = hoomd.md.nlist.Cell(buffer=0.4)
+# # these are not standard DPD parameters!
+# dpd = hoomd.md.pair.DPD(nlist=nl, kT=kT, default_r_cut=sPEOPEO)
+# dpd.params[('PEO','PEO')] =         dict(A=200,gamma=4.5)
+# dpd.params[('PEO','Benz')] =        dict(A=200,gamma=4.5)
+# dpd.params[('PEO','NN')] =          dict(A=200,gamma=4.5)
+# dpd.params[('PEO','Endgroup')] =    dict(A=200,gamma=4.5)
+# dpd.params[('Benz','Benz')] =       dict(A=200,gamma=4.5)
+# dpd.params[('Benz','NN')] =         dict(A=200,gamma=4.5)
+# dpd.params[('Benz','Endgroup')] =   dict(A=200,gamma=4.5)
+# dpd.params[('NN','NN')] =           dict(A=200,gamma=4.5)
+# dpd.params[('NN','Endgroup')] =     dict(A=200,gamma=4.5)
+# dpd.params[('Endgroup','Endgroup')] =     dict(A=200,gamma=4.5)
+# dpd.r_cut[('PEO','PEO')] =   sPEOPEO
+# dpd.r_cut[('PEO','Benz')] =  sPEOBenz
+# dpd.r_cut[('PEO','NN')] =    sPEONN
+# dpd.r_cut[('PEO','Endgroup')] = sPEOEndgroup
+# dpd.r_cut[('Benz','Benz')] = sBenzBenz
+# dpd.r_cut[('Benz','NN')] =   sBenzNN
+# dpd.r_cut[('Benz','Endgroup')] = sBenzEndgroup
+# dpd.r_cut[('NN','NN')] =     sNNNN
+# dpd.r_cut[('NN','Endgroup')] = sNNEndgroup
+# dpd.r_cut[('Endgroup','Endgroup')] = sEndgroupEndgroup
+
+# interactions = azobenzene_potentials.PotentialParameterizer()
+# lj = interactions.ljPair(nl=nl)
+# harmonicBonds = interactions.harmonicBonds()
+# angles = interactions.angles()
 
 # #Lennard-Jones pair interactions
 # lj = hoomd.md.pair.LJ(nlist=nl,mode='xplor')
@@ -216,7 +256,7 @@ fire = hoomd.md.minimize.FIRE(dt=0.005,
                                     energy_tol=1e-4)
 
 fire.methods.append(nve)
-fire.forces = [harmonicBonds,dpd]
+fire.forces = [bond_harmonic,dpd]
 
 sim.operations.integrator = fire
 sim.run(1e6)
@@ -226,11 +266,11 @@ print('fire harmonic, dpd done')
 # sim.run(1e4)
 # print('fire fene, dpd done')
 
-fire.forces = [harmonicBonds,lj]
+fire.forces = [bond_harmonic,lj]
 sim.run(1e4)
 print('fire harmonic, lj done')
 
-fire.forces = [harmonicBonds,lj,angles]
+fire.forces = [bond_harmonic,lj,angle_forces]
 sim.run(1e4)
 print('fire harmonic, lj, angle done')
 
@@ -243,7 +283,7 @@ integrator = hoomd.md.Integrator(dt=0.005)
 langevin = hoomd.md.methods.Langevin(filter=hoomd.filter.All(),kT=kT,default_gamma=0.1)
 
 integrator.methods.append(langevin)
-integrator.forces = [lj,harmonicBonds,angles]
+integrator.forces = [lj,bond_harmonic,angle_forces]
 
 sim.operations.integrator = integrator
 sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(),kT=kT)

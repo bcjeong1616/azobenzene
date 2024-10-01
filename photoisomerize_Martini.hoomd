@@ -8,6 +8,30 @@ from random_polymerMelt_maker import RandomPolymerMaker
 import argparse
 from pathlib import Path
 import azobenzene_potentials
+sys.path.append('/home/bj21/programs/')
+from martini3 import molecules
+from martini3 import init_cell
+from martini3 import force_fields
+import datetime
+import csv
+
+
+class Status:
+    def __init__(self, simulation):
+        self.simulation = simulation
+
+    @property
+    def seconds_remaining(self):
+        try:
+            return (
+                self.simulation.final_timestep - self.simulation.timestep
+            ) / self.simulation.tps
+        except ZeroDivisionError:
+            return 0
+
+    @property
+    def etr(self):
+        return str(datetime.timedelta(seconds=self.seconds_remaining))
 
 parser = argparse.ArgumentParser(description='Performs npt uniaxial deformation of a given system')
 
@@ -37,11 +61,12 @@ else:
         output_file = f"iso_{args.input_file}" \
 
 #Output
-if not os.path.exists("./iso/"):
-    os.makedirs("./iso/")
+path = input_gsd.parent.absolute()
+if not os.path.exists(str(path) + "/iso/"):
+    os.makedirs(str(path) + "/iso/")
 out_string = output_file.replace('.gsd','')
-gsd_file='./iso/%s.gsd'%(out_string)
-log_file='./iso/%s.log'%(out_string)
+gsd_file=str(path)+'/iso/%s.gsd'%(out_string)
+log_file=str(path)+'/iso/%s.log'%(out_string)
 
 #-----------------------------------------------------------------------------
 #                              Parameterization
@@ -80,11 +105,41 @@ with gsd.hoomd.open(name=input_gsd, mode='r') as f:
     frame = f[-1]
     f.close()
 
-transID = np.where(np.array(frame.angles.types) == 'transAzo')[0][0]
-cisID = np.where(np.array(frame.angles.types) == 'cisAzo')[0][0]
+path = input_gsd.parent.absolute()
+
+# Find the IDs of the trans and cis isomer angles
+transID = -1
+cisID = -1
+with open(str(path) + '/angles.csv', "r") as file:
+    reader = csv.reader(file)
+    for row in reader:
+        if row[1] == '30' and math.isclose(float(row[2]),3.14159265358979):
+            transID = int(row[0])
+        if row[1] == '30' and math.isclose(float(row[2]),1.047197551):
+            cisID = int(row[0])
+
+# print(transID)
+# print(cisID)
+# print(frame.angles.types)
+if cisID == -1:
+    #add the cis azo angle definition to the csv
+    with open(str(path) + '/angles.csv', "a") as file:
+        writer = csv.writer(file, quoting=csv.QUOTE_ALL)
+        writer.writerow([len(frame.angles.types), 30, 1.047197551])
+if not cisID in frame.angles.types:
+    #add the cis azo angle definition to the frame.angles.types
+    cisID = len(frame.angles.types)
+    frame.angles.types.append(str(len(frame.angles.types)))
+
+# print(transID)
+# print(cisID)
+# print(frame.angles.types)
+
+# transID = np.where(np.array(frame.angles.types) == 'transAzo')[0][0]
+# cisID = np.where(np.array(frame.angles.types) == 'cisAzo')[0][0]
 cisID_arr = [cisID]*len(frame.angles.typeid)
 frame.angles.typeid[np.where(frame.angles.typeid == transID)] = cisID
-# frame.angles.typeid = np.where(frame.angles.typeid != transID,cisID_arr,frame.angles.typeid)
+# # frame.angles.typeid = np.where(frame.angles.typeid != transID,cisID_arr,frame.angles.typeid)
 
 #-----------------------------------------------------------------------
 #                               Setup system
@@ -127,88 +182,31 @@ with gsd.hoomd.open(name=gsd_file, mode='w') as f:
 #                        Particle interactions
 #-----------------------------------------------------------------------
 
-nl = hoomd.md.nlist.Cell(buffer=0.4)
-# these are not standard DPD parameters!
-dpd = hoomd.md.pair.DPD(nlist=nl, kT=kT, default_r_cut=sPEOPEO)
-dpd.params[('PEO','PEO')] =         dict(A=15,gamma=4.5)
-dpd.params[('PEO','Benz')] =        dict(A=15,gamma=4.5)
-dpd.params[('PEO','NN')] =          dict(A=15,gamma=4.5)
-dpd.params[('PEO','Endgroup')] =    dict(A=15,gamma=4.5)
-dpd.params[('Benz','Benz')] =       dict(A=15,gamma=4.5)
-dpd.params[('Benz','NN')] =         dict(A=15,gamma=4.5)
-dpd.params[('Benz','Endgroup')] =   dict(A=15,gamma=4.5)
-dpd.params[('NN','NN')] =           dict(A=15,gamma=4.5)
-dpd.params[('NN','Endgroup')] =     dict(A=15,gamma=4.5)
-dpd.params[('Endgroup','Endgroup')] =     dict(A=15,gamma=4.5)
-dpd.r_cut[('PEO','PEO')] =   sPEOPEO
-dpd.r_cut[('PEO','Benz')] =  sPEOBenz
-dpd.r_cut[('PEO','NN')] =    sPEONN
-dpd.r_cut[('Benz','Benz')] = sBenzBenz
-dpd.r_cut[('Benz','NN')] =   sBenzNN
-dpd.r_cut[('NN','NN')] =     sNNNN
-dpd.r_cut[('Benz','Endgroup')] = sBenzEndgroup
-dpd.r_cut[('PEO','Endgroup')] = sPEOEndgroup
-dpd.r_cut[('NN','Endgroup')] = sNNEndgroup
-dpd.r_cut[('Endgroup','Endgroup')] = sEndgroupEndgroup
+'''
+path = input_gsd.parent.absolute()
 
-interactions = azobenzene_potentials.PotentialParameterizer()
-lj = interactions.ljPair(nl=nl)
-harmonicBonds = interactions.harmonicBonds()
-angles = interactions.angles()
+# change trans isomer angle to cis.
 
-# #Lennard-Jones pair interactions
-# lj = hoomd.md.pair.LJ(nlist=nl,mode='xplor')
-# lj.params[('PEO','PEO')] =     dict(epsilon=ePEOPEO,sigma=sPEOPEO)
-# lj.params[('PEO','Benz')] =    dict(epsilon=ePEOBenz,sigma=sPEOBenz)
-# lj.params[('PEO','NN')] =      dict(epsilon=ePEONN,sigma=sPEONN)
-# lj.params[('Benz','Benz')] =   dict(epsilon=eBenzBenz,sigma=sBenzBenz)
-# lj.params[('Benz','NN')] =     dict(epsilon=eBenzNN,sigma=sBenzNN)
-# lj.params[('NN','NN')] =       dict(epsilon=eNNNN,sigma=sNNNN)
-# lj.r_cut[('PEO','PEO')] =   3.0*sPEOPEO
-# lj.r_cut[('PEO','Benz')] =  3.0*sPEOBenz
-# lj.r_cut[('PEO','NN')] =    3.0*sPEONN
-# lj.r_cut[('Benz','Benz')] = 3.0*sBenzBenz
-# lj.r_cut[('Benz','NN')] =   3.0*sBenzNN
-# lj.r_cut[('NN','NN')] =     3.0*sNNNN
-# lj.params[('Endgroup',['PEO','Benz','NN','Endgroup'])] =     dict(epsilon=ePEOPEO,sigma=sPEOPEO)
-# lj.r_cut[('Endgroup',['PEO','Benz','NN','Endgroup'])] =     3.0*sNNNN
+#read the current angles.csv and replace the one that corresponds to the trans azobenzene
+tmp = []
+with open(str(path) + '/angles.csv', "r") as file:
+    reader = csv.reader(file)
+    for row in reader:
+        if row[1] == '30' and row[2] == '3.141592653589793':
+            tmp.append([row[0],'30', '1.047197551'])
+        else:
+            tmp.append(row)
 
-# #harmonic bonds
-# harmonic = hoomd.md.bond.Harmonic()
-# harmonic.params['PEOPEO'] =     dict(k=100.0, r0=sPEOPEO)
-# harmonic.params['BenzPEO'] =    dict(k=100.0, r0=sPEOBenz)
-# harmonic.params['NNPEO'] =      dict(k=100.0, r0=sPEONN)
-# harmonic.params['BenzBenz'] =   dict(k=100.0, r0=sBenzBenz)
-# harmonic.params['BenzNN'] =     dict(k=100.0, r0=sBenzNN)
-# harmonic.params['NNNN'] =       dict(k=100.0, r0=sNNNN)
-# harmonic.params['EndgroupPEO'] =       dict(k=100.0, r0=sNNNN)
-# harmonic.params['BenzEndgroup'] =       dict(k=100.0, r0=sNNNN)
-# harmonic.params['EndgroupNN'] =       dict(k=100.0, r0=sNNNN)
-# harmonic.params['EndgroupEndgroup'] =       dict(k=100.0, r0=sNNNN)
+#overwrite the old angles.csv
+with open(str(path) + '/angles.csv', "w") as file:
+    writer = csv.writer(file, quoting=csv.QUOTE_ALL)
+    for item in tmp:
+        writer.writerow(item)
+'''
 
-
-# # FENE bonds
-# fene = hoomd.md.bond.FENEWCA()
-# fene.params['PEOPEO'] =     dict(k=30,r0=1.5*sPEOPEO, epsilon=ePEOPEO, sigma=sPEOPEO, delta=0.0)
-# fene.params['BenzPEO'] =    dict(k=30,r0=1.5*sPEOBenz,epsilon=ePEOBenz,sigma=sPEOBenz,delta=0.0)
-# fene.params['NNPEO'] =      dict(k=30,r0=1.5*sPEONN, epsilon=ePEONN, sigma=sPEONN, delta=0.0)
-# fene.params['BenzBenz'] =   dict(k=30,r0=1.5*sBenzBenz,epsilon=eBenzBenz,sigma=sBenzBenz,delta=0.0)
-# fene.params['BenzNN'] =     dict(k=30,r0=1.5*sBenzNN, epsilon=eBenzNN, sigma=sBenzNN, delta=0.0)
-# fene.params['NNNN'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
-# fene.params['EndgroupPEO'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
-# fene.params['BenzEndgroup'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
-# fene.params['EndgroupNN'] =      dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
-# fene.params['EndgroupEndgroup'] =       dict(k=30,r0=1.5*sNNNN,epsilon=eNNNN,sigma=sNNNN,delta=0.0)
-
-# #angles
-# angle = hoomd.md.angle.CosineSquared()
-# angle.params['transAzo'] = dict(k=100.0,t0=math.pi)
-# angle.params['cisAzo'] = dict(k=100.0, t0=2*math.pi/6)
-# angle.params['polymer'] = dict(k=0.0, t0=math.pi)
-
-#Dihedrals parameterization will go here
-
-
+lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid = force_fields.forces_from_gsd(
+        str(path)+'/', str(input_gsd.name)
+    )
 
 #-----------------------------------------------------------------------
 #                                Run
@@ -224,8 +222,9 @@ fire = hoomd.md.minimize.FIRE(dt=0.005,
 fire.methods.append(nve)
 
 for t0 in np.linspace(math.pi,math.pi/3,15):
-    angles.params['cisAzo'] = dict(k=100.0,t0=t0)
-    fire.forces = [lj,harmonicBonds,angles]
+    # angle_forces.params[str(0)] = dict(k=100.0,t0=t0)
+    angle_forces.params[str(cisID)] = dict(k=100.0,t0=t0)
+    fire.forces = [lj,bond_harmonic,angle_forces] #dihedrals
     sim.operations.integrator = fire
     print(t0)
     sim.run(1e4)
@@ -240,7 +239,7 @@ integrator = hoomd.md.Integrator(dt=0.005)
 langevin = hoomd.md.methods.Langevin(filter=hoomd.filter.All(),kT=kT,default_gamma=0.1)
 
 integrator.methods.append(langevin)
-integrator.forces = [lj,harmonicBonds,angles]
+integrator.forces = [lj,bond_harmonic,angle_forces]
 
 sim.operations.integrator = integrator
 sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(),kT=kT)

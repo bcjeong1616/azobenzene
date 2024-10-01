@@ -64,7 +64,7 @@ def main(seq,id,name_a,name_b):
             y_shift=y_shift,
             z_shift=z_shift,
             is_inverted=is_inverted,
-            bond_angle=135
+            bond_angle=135,
         )
         
         del grid_polym[rand_pos]
