@@ -212,7 +212,7 @@ class RandomPolymerMaker():
                     bond_angle=135
                 )
             molecule_positions = np.array(molecule.position)
-            wrap_pbc(molecule_positions)
+            self.wrap_pbc(molecule_positions)
 
             
 
