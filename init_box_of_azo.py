@@ -203,7 +203,7 @@ def main():
     lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid = force_fields.forces_from_gsd(
         path, "init.gsd"
     )
-    mttk = hoomd.md.methods.thermostats.MTTK(kT = 1.5, tau = 1)
+    mttk = hoomd.md.methods.thermostats.MTTK(kT = 3.3258, tau = 1)
     cv = hoomd.md.methods.ConstantVolume(filter = hoomd.filter.All(),thermostat = mttk)
     integratorNVT = hoomd.md.Integrator(
         dt=0.02,
