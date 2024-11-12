@@ -19,7 +19,61 @@ rng = np.random.default_rng()
 class RandomNetworkMaker():
 
     def __init__(self,L,num_backbone,length_backbone,crosslinking_probability,
-                 length_crosslinkers,length_sidechains,azo_probability,num_ionic_liquid):
+                 length_crosslinkers,length_sidechains,azo_probability,num_ionic_liquid,
+                 azo_architecture):
+        ## define chemical tags ----
+        self.particle_types = ['TC1','SN4a','SN3r','SC1','TN3r','TC5','TN2q','TC6','TC3','SX4e','SQ4n',]
+        ## ---------------[  0  , 1  ,     2     ,  3 ,     4     ,   5]
+        self.bond_types = ['TC1-TC1','TC1-SN4a','SN4a-SN3r','SN3r-SN3r',
+                           'SN4a-SC1','SC1-SC1','SC1-TN3r','TN3r-TC5',
+                           'TC5-TC5','SC1-TN2q',
+                           'SX4e-SQ4n','SQ4n-SQ4n','TN2q-TN2q','TN2q-TC3','TN2q-TC6']
+        self.angle_types = ['generic','backbone','PEO','azo_ring','azo_trans_isomer',
+                            'azo_cis_isomer','TFSI1','TFSI2','EMIM']
+        self.dihedral_types = ['PEO','TFSI']
+
+        self.TC1 = 0
+        self.SN4a = 1
+        self.SN3r = 2
+        self.SC1 = 3
+        self.TN3r = 4
+        self.TC5 = 5
+        self.TN2q = 6
+        self.TC6 = 7
+        self.TC3 = 8
+        self.SX4e = 9
+        self.SQ4n = 10
+
+        self.TC1_TC1 = 0
+        self.TC1_SN4a = 1
+        self.SN4a_SN3r = 2
+        self.SN3r_SN3r = 3
+        #For Azo with IL
+        self.SN4a_SC1 = 4
+        self.SC1_SC1 = 5
+        self.SC1_TN3r = 6
+        self.TN3r_TC5 = 7
+        self.TC5_TC5 = 8
+        self.SC1_TN2q = 9
+        # for IL
+        self.SX4e_SQ4n = 10
+        self.SQ4n_SQ4n = 11
+        self.TN2q_TN2q = 12
+        self.TN2q_TC3 = 13
+        self.TN2q_TC6 = 14
+
+        self.generic_angle = 0
+        self.backbone_angle_id = 1
+        self.PEO_angle = 2
+        self.azo_ring_angle = 3
+        self.azo_cis_isomer_angle = 4
+        self.azo_trans_isomer_angle = 5
+        self.TFSI1_angle_typeid = 6
+        self.TFSI2_angle_typeid = 7
+        self.EMIM_angle_typeid = 8
+
+        self.PEO_dihedral_typeid = 0
+        self.TFSI_dihedral_typeid = 1
 
         self.L = L
         self.length_backbone = length_backbone
@@ -30,19 +84,29 @@ class RandomNetworkMaker():
         self.azo_probability = azo_probability
         self.num_ionic_liquid = num_ionic_liquid
 
-        self.bonds = []
         self.positions_backbone = []
         self.positions_crosslinks = []
-        self.types_backones = []
+        self.types_backbones = []
         self.types_crosslinkers = []
 
-        self.types_ionic_liquid = []
         self.positions_ionic_liquid = []
+        self.types_ionic_liquid = []
+
+        self.bonds = []
+        self.bonds_typeids = []
+
+        self.angles = []
+        self.angles_typeids = []
+
+        self.dihedrals = []
+        self.dihedrals_typeids = []
+
+        self.azo_architecture = azo_architecture
 
 
     def create_system(self):
         self.create_polymer_system()
-        self.add_ionic_iquid()
+        self.add_ionic_liquid()
 
     def create_polymer_system(self):
         # create backbones
@@ -57,23 +121,30 @@ class RandomNetworkMaker():
             for j,pi in enumerate(pos):
                 p_wrap =self.wrap_pbc(pi,np.array([self.L,self.L,self.L]))
                 self.positions_backbone.append(p_wrap)
-                self.types_backones.append(0)
+                # all backbones are available for crosslinking and forming sidechains:
+                self.types_backbones.append(9999) #9999 indicates availability
                 if j<len(pos)-1:
                     self.bonds.append([i,i+1])
+                    self.bonds_typeids.append(self.TC1_TC1)
+                if j<len(pos)-2:
+                    self.angles.append([i,i+1,i+2])
+                    self.angles_typeids.append(self.backbone_angle_id)
                 i = i + 1
 
+        self.num_tethered_azo = 0
         # sidechains and crosslinks
         for k,p in enumerate(self.positions_backbone):
-            # only the ones with id=0 are open
-            if self.types_backones[k] == 0:
-                # make a crosslink, PEG diacrylate (not azobenze for now)
+            # only the ones with id=-1 are open
+            if self.types_backbones[k] == 9999:
+                # make a crosslink, PEG diacrylate (not azobenzene for now)
                 random_number = np.random.uniform(0,1)
                 if random_number < self.crosslinking_probability:
-                    self.types_backones[k] = 1
+                    self.types_backbones[k] = self.TC1
                     start_pos = p
-                    # selection function, returns id of another backbone monomer with no crosslinker on it
-                    end_pos_id = self.select_crosslinker(k,self.types_backones,self.positions_backbone)
-                    self.types_backones[end_pos_id] = 1
+                    # selection function, returns id of another backbone monomer with no
+                    # crosslinker on it
+                    end_pos_id = self.select_crosslinker(k,self.types_backbones,self.positions_backbone)
+                    self.types_backbones[end_pos_id] = self.TC1
 
                     # draw a gaussian bridge from start to end (random_from_to)
                     # random_from_to doesn't do PBC, so we "unwrap"
@@ -87,30 +158,69 @@ class RandomNetworkMaker():
                         p_wrap =self.wrap_pbc(pi,np.array([self.L,self.L,self.L]))
                         self.positions_crosslinks.append(p_wrap)
                         if j == 0:
+                            self.types_crosslinkers.append(self.SN4a)
                             self.bonds.append([k,i])
-                            self.types_crosslinkers.append(0)
-                        if j<len(pos)-2:
+                            self.bonds_typeids.append(self.TC1_SN4a)
                             self.bonds.append([i,i+1])
-                            self.types_crosslinkers.append(2)
+                            self.bonds_typeids.append(self.SN4a_SN3r)
+                        if j != 0 and j < len(pos)-2:
+                            self.types_crosslinkers.append(self.SN3r)
+                            self.bonds.append([i,i+1])
+                            self.bonds_typeids.append(self.SN3r_SN3r)
                         if j == len(pos)-2:
+                            self.types_crosslinkers.append(self.SN3r)
                             self.bonds.append([i,i+1])
-                            self.types_crosslinkers.append(0)
+                            self.bonds_typeids.append(self.SN4a_SN3r)
                         if j == len(pos)-1:
+                            self.types_crosslinkers.append(self.SN4a)
                             self.bonds.append([i,end_pos_id])
+                            self.bonds_typeids.append(self.TC1_SN4a)
+                        #add angle associated with the new particle
+                        if j == 0:
+                            self.angles.append([k,i,i+1])
+                            self.angles_typeids.append(self.generic_angle)
+                        if j == 1:
+                            self.angles.append([i-1,i,i+1])
+                            self.angles_typeids.append(self.generic_angle)
+                        if 1 < j and j < len(pos)-2:
+                            self.angles.append([i-1,i,i+1])
+                            self.angles_typeids.append(self.PEO_angle)
+                        if j == len(pos) - 2:
+                            self.angles.append([i-1,i,i+1])
+                            self.angles_typeids.append(self.generic_angle)
+                        if j == len(pos) - 1:
+                            self.angles.append([i-1,i,end_pos_id])
+                            self.angles_typeids.append(self.generic_angle)
+                        #add dihedral associated with the new particle
+                        if 0 < j and j < len(pos) - 4:
+                            self.dihedrals.append([i,i+1,i+2,i+3])
+                            self.dihedrals_typeids.append(self.PEO_dihedral_typeid)
 
                         i = i + 1
+                    # print(pos)
+                    # print(len(pos))
+                    # print(self.types_crosslinkers)
+                    # print(len(self.types_crosslinkers))
+                    # print(len(self.bonds))
+                    # print(len(self.bonds_typeids))
+                    # break
 
                 # add sidechain (could be PEG or Azo)
                 else:
                     random_number = np.random.uniform(0,1)
-                     # add EMIM-Tethered Azo sidechain
+                    # add EMIM-Tethered Azo sidechain
                     if random_number < self.azo_probability:
-                        self.types_backones[k] = 1
+                        # increment number of IL-tethered azos
+                        self.num_tethered_azo += 1
+
+                        self.types_backbones[k] = 1
                         start_pos = p
 
                         length_azo = 17
                         q = self.random_FRC(length_azo+2,0.2,1.0)
-                        pos = (start_pos + q[2:])
+                        pos = (start_pos + q[2:] - q[1])
+                        # q = self.random_FRC(length_azo,0.2,1.0)
+                        # pos = (start_pos + q)
 
                         for j,pi in enumerate(pos):
                             p_wrap =self.wrap_pbc(pi,np.array([self.L,self.L,self.L]))
@@ -119,115 +229,210 @@ class RandomNetworkMaker():
                             #  0      1     2       3        4    5      6     7      8    9
                             #['SN4a','TC1','SN3r','SN3r1','SC1','TN3r','TC5','TN2q','TC6','10']
                             if j == 0:
+                                self.types_crosslinkers.append(self.SN4a)
                                 self.bonds.append([k,i])
+                                self.bonds_typeids.append(self.TC1_SN4a)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(0)
+                                self.bonds_typeids.append(self.SN4a_SC1)
+                                self.angles.append([k,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
                             if j == 1:
+                                self.types_crosslinkers.append(self.SC1)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(4)
+                                self.bonds_typeids.append(self.SC1_SC1)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
                             if j == 2:
+                                self.types_crosslinkers.append(self.SC1)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(4)
+                                self.bonds_typeids.append(self.SC1_TN3r)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
                             if j == 3:
+                                self.types_crosslinkers.append(self.TN3r)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(5)
+                                self.bonds_typeids.append(self.TN3r_TC5)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
                             if j == 4:
+                                self.types_crosslinkers.append(self.TC5)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(6)
+                                self.bonds_typeids.append(self.TC5_TC5)
+                                self.angles.append([i-1,i,i+2])
+                                self.angles_typeids.append(self.azo_ring_angle)
                             if j == 5:
+                                self.types_crosslinkers.append(self.TC5)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(6)
+                                self.bonds_typeids.append(self.TC5_TC5)
                             if j == 6:
-                                self.bonds.append([i,i+1])
+                                self.types_crosslinkers.append(self.TC5)
                                 self.bonds.append([i,i-2])
-                                self.types_crosslinkers.append(6)
+                                self.bonds_typeids.append(self.TC5_TC5)
+                                self.bonds.append([i,i+1])
+                                self.bonds_typeids.append(self.TN3r_TC5)
+                                self.angles.append([i-2,i,i+1])
+                                self.angles_typeids.append(self.azo_ring_angle)
                             if j == 7:
+                                self.types_crosslinkers.append(self.TN3r)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(5)
+                                self.bonds_typeids.append(self.TN3r_TC5)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.azo_trans_isomer_angle)
                             if j == 8:
+                                self.types_crosslinkers.append(self.TC5)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(6)
+                                self.bonds_typeids.append(self.TC5_TC5)
+                                self.angles.append([i-1,i,i+2])
+                                self.angles_typeids.append(self.azo_ring_angle)
                             if j == 9:
+                                self.types_crosslinkers.append(self.TC5)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(6)
+                                self.bonds_typeids.append(self.TC5_TC5)
                             if j == 10:
+                                self.types_crosslinkers.append(self.TC5)
                                 self.bonds.append([i,i+1])
+                                self.bonds_typeids.append(self.TN3r_TC5)
                                 self.bonds.append([i,i-2])
-                                self.types_crosslinkers.append(6)
+                                self.bonds_typeids.append(self.TC5_TC5)
+                                self.angles.append([i-2,i,i+1])
+                                self.angles_typeids.append(self.azo_ring_angle)
                             if j == 11:
+                                self.types_crosslinkers.append(self.TN3r)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(5)
+                                self.bonds_typeids.append(self.SC1_TN3r)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
                             if j == 12:
+                                self.types_crosslinkers.append(self.SC1)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(4)
+                                self.bonds_typeids.append(self.SC1_SC1)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
                             if j == 13:
+                                self.types_crosslinkers.append(self.SC1)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(4)
+                                self.bonds_typeids.append(self.SC1_TN2q)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
                             if j == 14:
+                                self.types_crosslinkers.append(self.TN2q)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(8)
+                                self.bonds_typeids.append(self.TN2q_TN2q)
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.EMIM_angle_typeid)
+                                self.angles.append([i-1,i,i+2])
+                                self.angles_typeids.append(self.EMIM_angle_typeid)
                             if j == 15:
+                                self.types_crosslinkers.append(self.TN2q)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(7)
+                                self.bonds_typeids.append(self.TN2q_TC6)
                             if j == 16:
+                                self.types_crosslinkers.append(self.TC6)
                                 self.bonds.append([i,i-2])
-                                self.types_crosslinkers.append(7)
+                                self.bonds_typeids.append(self.TN2q_TC6)
                             i = i+1
+                        # print(pos)
+                        # print(len(pos))
+                        # print(self.types_crosslinkers)
+                        # print(len(self.types_crosslinkers))
+                        # print(len(self.bonds))
+                        # break
 
                     # add PEG acrylate sidechain
                     else:
-                        self.types_backones[k] = 1
+                        self.types_backbones[k] = self.TC1
                         start_pos = p
                         # w = self.get_gaussian_vector(self.length_sidechains)
                         # pos = self.random_from_to(1,self.length_sidechains+2,start_pos,start_pos-w)
                         # pos = np.asarray(pos[0][1:-1])
 
-                        q = self.random_FRC(self.length_sidechains+2,0.2,1.0)
+                        q = self.random_FRC(self.length_sidechains+1+2,0.2,1.0)
 
-                        pos = (start_pos + q[2:])
+                        pos = (start_pos + q[2:] - q[1])
 
                         for j,pi in enumerate(pos):
                             p_wrap =self.wrap_pbc(pi,np.array([self.L,self.L,self.L]))
                             self.positions_crosslinks.append(p_wrap)
                             if j == 0:
+                                self.types_crosslinkers.append(self.SN4a)
                                 self.bonds.append([k,i])
-                                self.types_crosslinkers.append(0)
-                            if j<len(pos)-2:
+                                self.bonds_typeids.append(self.TC1_SN4a)
                                 self.bonds.append([i,i+1])
-                                self.types_crosslinkers.append(3)
-                            if j==len(pos)-2:
-                                self.types_crosslinkers.append(3)
+                                self.bonds_typeids.append(self.SN4a_SN3r)
+                            if j != 0 and j < len(pos)-1:
+                                self.types_crosslinkers.append(self.SN3r)
+                                self.bonds.append([i,i+1])
+                                self.bonds_typeids.append(self.SN3r_SN3r)
+                            if j==len(pos)-1:
+                                self.types_crosslinkers.append(self.SN3r)
+
+                            #add angles
+                            if j == 0:
+                                self.angles.append([k,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
+                            if j == 1:
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.generic_angle)
+                            if 1 < j and j < len(pos) - 1:
+                                self.angles.append([i-1,i,i+1])
+                                self.angles_typeids.append(self.PEO_angle)
+                            #add dihedrals
+                            if 0 < j and j < len(pos) - 3:
+                                self.dihedrals.append([i,i+1,i+2,i+3])
+                                self.dihedrals_typeids.append(self.PEO_dihedral_typeid)
 
                             i = i + 1
+                        # print(self.positions_crosslinks)
+                        # print(len(pos))
+                        # print(self.types_crosslinkers)
+                        # print(len(self.types_crosslinkers))
+                        # print(len(self.bonds))
+                        # break
 
 
         self.positions_crosslinks = np.asarray(self.positions_crosslinks)
         self.positions_backbone = np.asarray(self.positions_backbone)
 
         #self.bonds = np.asarray(self.bonds)
-        self.types_backones = np.asarray(self.types_backones)
+        self.types_backbones = np.asarray(self.types_backbones)
         self.types_crosslinkers = np.asarray(self.types_crosslinkers)
 
-    def add_ionic_iquid(self):
-        # existing thethered EMIM
-        N_current_charge = int(len(self.types_crosslinkers[self.types_crosslinkers==7])/2.0)
-        N_to_add_EMIM = int(self.num_ionic_liquid/2.0) - N_current_charge
-        #TFSI
-        N_to_add_TFSI = int(self.num_ionic_liquid/2.0)
-        i = len(self.types_backones) + len(self.types_crosslinkers)
+    def add_ionic_liquid(self):
+        if self.azo_architecture == 'sideChainIL':
+            N_to_add_EMIM = 0
+            N_to_add_TFSI = self.num_tethered_azo
+        else:
+            print("Unknown azo_architecture")
+            # existing tethered EMIM
+            N_current_charge = int(len(self.types_crosslinkers[self.types_crosslinkers==self.TC6])/2.0)
+            # N_current_charge = self.num_tethered_azo
+            N_to_add_EMIM = int(self.num_ionic_liquid/2.0) - N_current_charge
+            #TFSI
+            N_to_add_TFSI = int(self.num_ionic_liquid/2.0)
 
-        # 9     10
-        #'SX4e','SQ4n'
+        i = len(self.types_backbones) + len(self.types_crosslinkers)
+
         for n in range(N_to_add_TFSI):
 
-            self.bonds.append([i,i+1])
-            self.bonds.append([i+1,i+2])
-            self.bonds.append([i+2,i+3])
+            self.types_ionic_liquid.append(self.SX4e)
+            self.types_ionic_liquid.append(self.SQ4n)
+            self.types_ionic_liquid.append(self.SQ4n)
+            self.types_ionic_liquid.append(self.SX4e)
 
-            self.types_ionic_liquid.append(9)
-            self.types_ionic_liquid.append(10)
-            self.types_ionic_liquid.append(10)
-            self.types_ionic_liquid.append(9)
+            self.bonds.append([i,i+1])
+            self.bonds_typeids.append(self.SX4e_SQ4n)
+            self.bonds.append([i+1,i+2])
+            self.bonds_typeids.append(self.SQ4n_SQ4n)
+            self.bonds.append([i+2,i+3])
+            self.bonds_typeids.append(self.SX4e_SQ4n)
+
+            self.angles.append([i,i+1,i+2])
+            self.angles_typeids.append(self.TFSI1_angle_typeid)
+            self.angles.append([i+1,i+2,i+3])
+            self.angles_typeids.append(self.TFSI2_angle_typeid)
+
+            self.dihedrals.append([i,i+1,i+2,i+3])
+            self.dihedrals_typeids.append(self.TFSI_dihedral_typeid)
 
             q = self.random_FRC(4,0.2,1.0)
             com = np.random.uniform(-self.L/2.0,self.L/2.0,3)
@@ -239,19 +444,27 @@ class RandomNetworkMaker():
 
             i = i + 4
 
-        # 7     8
-        #'TN2q','TC6'
+
         for n in range(N_to_add_EMIM):
 
-            self.bonds.append([i,i+1])
-            self.bonds.append([i+1,i+2])
-            self.bonds.append([i,i+3])
-            self.bonds.append([i+1,i+3])
+            self.types_ionic_liquid.append(self.TN2q)
+            self.types_ionic_liquid.append(self.TN2q)
+            self.types_ionic_liquid.append(self.TC3)
+            self.types_ionic_liquid.append(self.TC6)
 
-            self.types_ionic_liquid.append(7)
-            self.types_ionic_liquid.append(7)
-            self.types_ionic_liquid.append(8)
-            self.types_ionic_liquid.append(8)
+            self.bonds.append([i,i+1])
+            self.bonds_typeids.append(self.TN2q_TN2q)
+            self.bonds.append([i+1,i+2])
+            self.bonds_typeids.append(self.TN2q_TC3)
+            self.bonds.append([i,i+3])
+            self.bonds_typeids.append(self.TN2q_TC6)
+            self.bonds.append([i+1,i+3])
+            self.bonds_typeids.append(self.TN2q_TC6)
+
+            self.angles.append([i,i+1,i+2])
+            self.angles_typeids.append(self.EMIM_angle_typeid)
+            self.angles.append([i+3,i+1,i+2])
+            self.angles_typeids.append(self.EMIM_angle_typeid)
 
             q = self.random_FRC(4,0.2,1.0)
             com = np.random.uniform(-self.L/2.0,self.L/2.0,3)
@@ -262,8 +475,10 @@ class RandomNetworkMaker():
                 self.positions_ionic_liquid.append(p_wrap)
 
             i = i + 4
-
-
+        
+        if len(self.positions_ionic_liquid) == 0:
+            print('No IL added')
+            self.positions_ionic_liquid = np.empty(shape=(0,3))
 
     def save_system(self,name_gsd):
         self.output = gsd.hoomd.open(name=name_gsd, mode='w')
@@ -273,7 +488,7 @@ class RandomNetworkMaker():
                                              self.positions_crosslinks,
                                              self.positions_ionic_liquid
                                             ))
-        self.types = np.hstack((self.types_backones,
+        self.types = np.hstack((self.types_backbones,
                                          self.types_crosslinkers,
                                          self.types_ionic_liquid
                                         ))
@@ -282,15 +497,27 @@ class RandomNetworkMaker():
 
         self.positions = self.wrap_pbc(self.positions,\
                                        np.array([self.L,self.L,self.L]))
+        self.scale_system(scaling=1/3)
 
         frame.particles.position = self.positions
                                 #  0      1     2       3        4    5      6     7      8    9     10
-        frame.particles.types = ['SN4a','TC1','SN3r','SN3r1','SC1','TN3r','TC5','TN2q','TC6','SX4e','SQ4n']
+        frame.particles.types = self.particle_types#['SN4a','TC1','SN3r','SN3r1','SC1','TN3r','TC5','TN2q','TC6','SX4e','SQ4n']
         frame.particles.typeid = self.types
 
         frame.bonds.N = len(self.bonds)
-        frame.bonds.types = ['A','B','C','D']
+        frame.bonds.types = self.bond_types
+        frame.bonds.typeid = self.bonds_typeids
         frame.bonds.group = self.bonds
+
+        frame.angles.N = len(self.angles)
+        frame.angles.types = self.angle_types
+        frame.angles.typeid = self.angles_typeids
+        frame.angles.group = self.angles
+
+        frame.dihedrals.N = len(self.dihedrals)
+        frame.dihedrals.types = self.dihedral_types
+        frame.dihedrals.typeid = self.dihedrals_typeids
+        frame.dihedrals.group = self.dihedrals
 
         frame.configuration.box = [self.L,self.L,self.L,0,0,0]
         self.output.append(frame)
@@ -337,7 +564,11 @@ class RandomNetworkMaker():
         # <cos theta> = (c-1)/(c+1)
         theta = np.arccos((characteristic_ratio-1)/(characteristic_ratio+1))
         coords = np.zeros((m,3))
-        coords[1]=[1,0,0]
+        first_vec = np.random.randn(3)
+        first_vec /= np.linalg.norm(first_vec, axis=0)
+        first_vec = first_vec.T
+        coords[1] = first_vec
+        # coords[1]=[1,0,0]
         for i in range(2,m):
             prev = coords[i-2]-coords[i-1]
             n = self.random_point_on_cone(bond_length,theta,prev)
@@ -378,6 +609,7 @@ class RandomNetworkMaker():
             b = b.T*np.sqrt(N/2.) + start
             b = b + v
             res.append(b)
+        print(res)
         return res
 
     def select_crosslinker(self,a,cr,pos):
@@ -388,7 +620,7 @@ class RandomNetworkMaker():
         max_trials = 1000
         trials = 0
         while picked == False and trials <= max_trials:
-            open_crosslinks = np.asarray(np.where(cr<1)[0])
+            open_crosslinks = np.asarray(np.where(cr==9999)[0])
             Box = np.array([self.L,self.L,self.L])+1e-2
 
             tree = KDTree(data=pos[open_crosslinks]+Box/2., leafsize=12,boxsize=Box)
@@ -439,4 +671,11 @@ class RandomNetworkMaker():
 
         return b[0]
 
-
+    def scale_system(self,scaling):
+        print(self.positions)
+        pos = np.asarray(self.positions)
+        pos = np.multiply(pos,scaling)
+        self.positions = pos
+        self.L = self.L*scaling
+        print(self.positions)
+        return
