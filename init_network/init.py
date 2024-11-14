@@ -160,7 +160,7 @@ harmonic.params['SQ4n-SQ4n'] =  dict(k=constraint_k, r0=0.247) # Grunewald 2018 
 
 
 
-angle_type_list = ['generic','backbone','PEO','azo_ring','azo_trans_isomer','azo_cis_isomer','TFSI','EMIM']
+angle_type_list = ['generic','backbone','PEO','azo_ring','azo_trans_isomer','azo_cis_isomer','TFSI1','TFSI2','EMIM']
 generic_k = 30
 harmonic_angle = hoomd.md.angle.Harmonic()
 harmonic_angle.params['generic'] = dict(k=0.0001,t0=np.pi) # None, should have no influence. Uses cosine sq
@@ -178,7 +178,7 @@ downselected_list = angle_type_list.copy()
 downselected_list.remove('generic')
 cosine_sq.params[downselected_list] = dict(k=0.0001,t0=np.pi)
 
-dihedral = hoomd.azplugins.BendingTorsion()
+dihedral = hoomd.azplugins.dihedral.BendingTorsion()
 dihedral.params['PEO'] = dict(k_phi=0.6570,a0=-1.3278,a1=-0.43661278,a2=1.0808704,
                               a3=0.680055,a4=0.0) # Polyply
 dihedral.params['TFSI'] = dict(k_phi=0,a0=0,a1=0,a2=0,a3=0,a4=0) #None. Just going to assume that it isn't significant
