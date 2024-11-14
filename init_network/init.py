@@ -66,13 +66,13 @@ harmonic = hoomd.md.bond.Harmonic()
 harmonic.params[bond_types] = dict(k=1, r0=0.3)
 
 displacement_capped = hoomd.md.methods.DisplacementCapped(filter=hoomd.filter.All(),
-                                                                # maximum_displacement=0.1)
-                                                                maximum_displacement=0.01)
+                                                                maximum_displacement=0.1)
+                                                                # maximum_displacement=0.01)
 
 fire = hoomd.md.minimize.FIRE(dt=0.05,
-                            force_tol=1e-2,
+                            force_tol=1e-3,
                             angmom_tol=1e-2,
-                            energy_tol=1e-3)
+                            energy_tol=1e-4)
 
 
 fire.methods = [displacement_capped]
@@ -89,23 +89,55 @@ fire.forces = [harmonic,gaussian]
 gaussian.params[particle_types,particle_types]= dict(A=1)
 harmonic.params[bond_types] = dict(k=1, r0=0.3)
 while not fire.converged:
+    print("FIRE looped")
     sim.run(100)
 
 fire.forces = []
 fire.methods = []
+del fire
+
+print("NVT ramp of harmonic strength")
+
+# integrator = hoomd.md.Integrator(dt=0.02)
+# sim.operations.integrator = integrator
+# displacement_capped = hoomd.md.methods.DisplacementCapped(
+#                                     filter=hoomd.filter.All(),
+#                                     maximum_displacement=0.0000001)
+# integrator.methods = [displacement_capped]
+# nvt = hoomd.md.methods.ConstantVolume(filter=hoomd.filter.All(),
+#                               thermostat=hoomd.md.methods.thermostats.Bussi(kT=1.0))
+# sim.operations.integrator.forces = [gaussian,harmonic]
+# sim.operations.integrator.methods = [nvt]
+# for Q in (10,100,1000):
+#     gaussian.params[particle_types,particle_types] = dict(A=Q)
+#     harmonic.params[bond_types] = dict(k=Q,r0=0.3)
+#     sim.run(1000)
+
+# integrator.forces = []
+# integrator.methods = []
+
 print("Minimize FIRE lj, harmonic")
+displacement_capped = hoomd.md.methods.DisplacementCapped(
+                                    filter=hoomd.filter.All(),
+                                    maximum_displacement=0.0000001)
 fire = hoomd.md.minimize.FIRE(dt=0.05,
                             force_tol=1e-2,
                             angmom_tol=1e-2,
-                            energy_tol=1e-3)
-fire.forces = [lj,harmonic]
+                            energy_tol=1e-4)
 fire.methods = [displacement_capped]
+harmonic.params[bond_types] = dict(k=7000, r0=0.3)
+fire.forces = [lj,harmonic]
+sim.operations.integrator = fire
+# while not fire.converged:
+#     print("Fire LJ exec")
+#     sim.run(100)
 sim.run(10_000)
 
 fire.forces = []
 
 # NPT relaxation just because
-integrator = hoomd.md.Integrator(dt=0.02)
+print("NPT dt = 0.001 start")
+integrator = hoomd.md.Integrator(dt=0.001)
 sim.operations.integrator = integrator
 npt = hoomd.md.methods.ConstantPressure(filter=hoomd.filter.All(),
                                         tauS=12.0,
@@ -120,6 +152,13 @@ integrator.forces = [lj,harmonic]
 sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(),kT=1.0)
 sim.run(10_000)
 
+print("NPT dt = 0.005")
+integrator.dt = 0.005
+sim.run(10_000)
+
+print("NPT dt = 0.02")
+integrator.dt = 0.02
+sim.run(10_000)
 #--------------------------------------------------
 #                   Force field
 #--------------------------------------------------
