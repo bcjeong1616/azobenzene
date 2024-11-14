@@ -32,6 +32,7 @@ class RandomNetworkMaker():
                             'azo_cis_isomer','TFSI1','TFSI2','EMIM']
         self.dihedral_types = ['PEO','TFSI']
 
+
         self.TC1 = 0
         self.SN4a = 1
         self.SN3r = 2
@@ -92,6 +93,12 @@ class RandomNetworkMaker():
         self.positions_ionic_liquid = []
         self.types_ionic_liquid = []
 
+        #72, 54, and 36 amu
+        self.R_mass = 72
+        self.S_mass = 54
+        self.T_mass = 36
+        self.masses = []
+
         self.bonds = []
         self.bonds_typeids = []
 
@@ -123,6 +130,7 @@ class RandomNetworkMaker():
                 self.positions_backbone.append(p_wrap)
                 # all backbones are available for crosslinking and forming sidechains:
                 self.types_backbones.append(9999) #9999 indicates availability
+                self.masses.append(self.T_mass)#27.044)
                 if j<len(pos)-1:
                     self.bonds.append([i,i+1])
                     self.bonds_typeids.append(self.TC1_TC1)
@@ -159,20 +167,24 @@ class RandomNetworkMaker():
                         self.positions_crosslinks.append(p_wrap)
                         if j == 0:
                             self.types_crosslinkers.append(self.SN4a)
+                            self.masses.append(self.S_mass)
                             self.bonds.append([k,i])
                             self.bonds_typeids.append(self.TC1_SN4a)
                             self.bonds.append([i,i+1])
                             self.bonds_typeids.append(self.SN4a_SN3r)
                         if j != 0 and j < len(pos)-2:
                             self.types_crosslinkers.append(self.SN3r)
+                            self.masses.append(self.S_mass)
                             self.bonds.append([i,i+1])
                             self.bonds_typeids.append(self.SN3r_SN3r)
                         if j == len(pos)-2:
                             self.types_crosslinkers.append(self.SN3r)
+                            self.masses.append(self.S_mass)
                             self.bonds.append([i,i+1])
                             self.bonds_typeids.append(self.SN4a_SN3r)
                         if j == len(pos)-1:
                             self.types_crosslinkers.append(self.SN4a)
+                            self.masses.append(self.S_mass)
                             self.bonds.append([i,end_pos_id])
                             self.bonds_typeids.append(self.TC1_SN4a)
                         #add angle associated with the new particle
@@ -230,6 +242,7 @@ class RandomNetworkMaker():
                             #['SN4a','TC1','SN3r','SN3r1','SC1','TN3r','TC5','TN2q','TC6','10']
                             if j == 0:
                                 self.types_crosslinkers.append(self.SN4a)
+                                self.masses.append(self.S_mass)
                                 self.bonds.append([k,i])
                                 self.bonds_typeids.append(self.TC1_SN4a)
                                 self.bonds.append([i,i+1])
@@ -238,34 +251,40 @@ class RandomNetworkMaker():
                                 self.angles_typeids.append(self.generic_angle)
                             if j == 1:
                                 self.types_crosslinkers.append(self.SC1)
+                                self.masses.append(self.S_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.SC1_SC1)
                                 self.angles.append([i-1,i,i+1])
                                 self.angles_typeids.append(self.generic_angle)
                             if j == 2:
                                 self.types_crosslinkers.append(self.SC1)
+                                self.masses.append(self.S_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.SC1_TN3r)
                                 self.angles.append([i-1,i,i+1])
                                 self.angles_typeids.append(self.generic_angle)
                             if j == 3:
                                 self.types_crosslinkers.append(self.TN3r)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TN3r_TC5)
                                 self.angles.append([i-1,i,i+1])
                                 self.angles_typeids.append(self.generic_angle)
                             if j == 4:
                                 self.types_crosslinkers.append(self.TC5)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TC5_TC5)
                                 self.angles.append([i-1,i,i+2])
                                 self.angles_typeids.append(self.azo_ring_angle)
                             if j == 5:
                                 self.types_crosslinkers.append(self.TC5)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TC5_TC5)
                             if j == 6:
                                 self.types_crosslinkers.append(self.TC5)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i-2])
                                 self.bonds_typeids.append(self.TC5_TC5)
                                 self.bonds.append([i,i+1])
@@ -274,22 +293,26 @@ class RandomNetworkMaker():
                                 self.angles_typeids.append(self.azo_ring_angle)
                             if j == 7:
                                 self.types_crosslinkers.append(self.TN3r)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TN3r_TC5)
                                 self.angles.append([i-1,i,i+1])
                                 self.angles_typeids.append(self.azo_trans_isomer_angle)
                             if j == 8:
                                 self.types_crosslinkers.append(self.TC5)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TC5_TC5)
                                 self.angles.append([i-1,i,i+2])
                                 self.angles_typeids.append(self.azo_ring_angle)
                             if j == 9:
                                 self.types_crosslinkers.append(self.TC5)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TC5_TC5)
                             if j == 10:
                                 self.types_crosslinkers.append(self.TC5)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TN3r_TC5)
                                 self.bonds.append([i,i-2])
@@ -298,24 +321,28 @@ class RandomNetworkMaker():
                                 self.angles_typeids.append(self.azo_ring_angle)
                             if j == 11:
                                 self.types_crosslinkers.append(self.TN3r)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.SC1_TN3r)
                                 self.angles.append([i-1,i,i+1])
                                 self.angles_typeids.append(self.generic_angle)
                             if j == 12:
                                 self.types_crosslinkers.append(self.SC1)
+                                self.masses.append(self.S_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.SC1_SC1)
                                 self.angles.append([i-1,i,i+1])
                                 self.angles_typeids.append(self.generic_angle)
                             if j == 13:
                                 self.types_crosslinkers.append(self.SC1)
+                                self.masses.append(self.S_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.SC1_TN2q)
                                 self.angles.append([i-1,i,i+1])
                                 self.angles_typeids.append(self.generic_angle)
                             if j == 14:
                                 self.types_crosslinkers.append(self.TN2q)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TN2q_TN2q)
                                 self.angles.append([i-1,i,i+1])
@@ -324,10 +351,12 @@ class RandomNetworkMaker():
                                 self.angles_typeids.append(self.EMIM_angle_typeid)
                             if j == 15:
                                 self.types_crosslinkers.append(self.TN2q)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.TN2q_TC6)
                             if j == 16:
                                 self.types_crosslinkers.append(self.TC6)
+                                self.masses.append(self.T_mass)
                                 self.bonds.append([i,i-2])
                                 self.bonds_typeids.append(self.TN2q_TC6)
                             i = i+1
@@ -355,16 +384,19 @@ class RandomNetworkMaker():
                             self.positions_crosslinks.append(p_wrap)
                             if j == 0:
                                 self.types_crosslinkers.append(self.SN4a)
+                                self.masses.append(self.S_mass)
                                 self.bonds.append([k,i])
                                 self.bonds_typeids.append(self.TC1_SN4a)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.SN4a_SN3r)
                             if j != 0 and j < len(pos)-1:
                                 self.types_crosslinkers.append(self.SN3r)
+                                self.masses.append(self.S_mass)
                                 self.bonds.append([i,i+1])
                                 self.bonds_typeids.append(self.SN3r_SN3r)
                             if j==len(pos)-1:
                                 self.types_crosslinkers.append(self.SN3r)
+                                self.masses.append(self.S_mass)
 
                             #add angles
                             if j == 0:
@@ -418,6 +450,10 @@ class RandomNetworkMaker():
             self.types_ionic_liquid.append(self.SQ4n)
             self.types_ionic_liquid.append(self.SQ4n)
             self.types_ionic_liquid.append(self.SX4e)
+            self.masses.append(self.S_mass)
+            self.masses.append(self.S_mass)
+            self.masses.append(self.S_mass)
+            self.masses.append(self.S_mass)
 
             self.bonds.append([i,i+1])
             self.bonds_typeids.append(self.SX4e_SQ4n)
@@ -451,6 +487,10 @@ class RandomNetworkMaker():
             self.types_ionic_liquid.append(self.TN2q)
             self.types_ionic_liquid.append(self.TC3)
             self.types_ionic_liquid.append(self.TC6)
+            self.masses.append(self.T_mass)
+            self.masses.append(self.T_mass)
+            self.masses.append(self.T_mass)
+            self.masses.append(self.T_mass)
 
             self.bonds.append([i,i+1])
             self.bonds_typeids.append(self.TN2q_TN2q)
@@ -503,6 +543,7 @@ class RandomNetworkMaker():
                                 #  0      1     2       3        4    5      6     7      8    9     10
         frame.particles.types = self.particle_types#['SN4a','TC1','SN3r','SN3r1','SC1','TN3r','TC5','TN2q','TC6','SX4e','SQ4n']
         frame.particles.typeid = self.types
+        frame.particles.mass = self.masses
 
         frame.bonds.N = len(self.bonds)
         frame.bonds.types = self.bond_types
@@ -609,7 +650,17 @@ class RandomNetworkMaker():
             b = b.T*np.sqrt(N/2.) + start
             b = b + v
             res.append(b)
-        print(res)
+        # print(start)
+        # print("res:", res)
+        # print(end)
+        # #check the distances
+        # for i in range(len(res[0])-1):
+        #     bond = res[0][i] - res[0][i+1]
+        #     self.wrap_pbc(bond,np.array([self.L,self.L,self.L]))
+        #     dist = np.sqrt(bond[0]**2 +bond[1]**2 + bond[2]**2)
+        #     print('bond distances:')
+        #     print(dist)
+
         return res
 
     def select_crosslinker(self,a,cr,pos):
@@ -672,10 +723,10 @@ class RandomNetworkMaker():
         return b[0]
 
     def scale_system(self,scaling):
-        print(self.positions)
+        # print(self.positions)
         pos = np.asarray(self.positions)
         pos = np.multiply(pos,scaling)
         self.positions = pos
         self.L = self.L*scaling
-        print(self.positions)
+        # print(self.positions)
         return
