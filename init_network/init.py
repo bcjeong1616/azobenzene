@@ -13,7 +13,7 @@ num_backbone=20#20
 length_backbone=100#100
 
 crosslinking_probability=0.0 # 30% of all backbone monomers have crosslinkers
-azo_probability = 0.05 # 50% of all side chains (non crosslinkers) are EMIM-tethered azo
+azo_probability = 0.0 # 50% of all side chains (non crosslinkers) are EMIM-tethered azo
 
 length_crosslinkers=13
 length_sidechains=9
@@ -70,7 +70,7 @@ displacement_capped = hoomd.md.methods.DisplacementCapped(filter=hoomd.filter.Al
                                                                 maximum_displacement=0.01)
 
 fire = hoomd.md.minimize.FIRE(dt=0.05,
-                            force_tol=1e-2,
+                            force_tol=1e-2,#3,
                             angmom_tol=1e-2,
                             energy_tol=1e-3)
 
@@ -78,7 +78,7 @@ fire = hoomd.md.minimize.FIRE(dt=0.05,
 fire.methods = [displacement_capped]
 sim.operations.integrator = fire
 
-gsd = hoomd.write.GSD(trigger=hoomd.trigger.Periodic(10_000),
+gsd = hoomd.write.GSD(trigger=hoomd.trigger.Periodic(1),#0_000),
                       mode='wb',
                       filename='minimize.gsd')
 sim.operations.writers.append(gsd)
@@ -109,12 +109,15 @@ sim.run(10000)
 fire.forces = []
 
 # NPT relaxation just because
-integrator = hoomd.md.Integrator(dt=0.001)
+integrator = hoomd.md.Integrator(dt=0.02)
 sim.operations.integrator = integrator
 npt = hoomd.md.methods.ConstantPressure(filter=hoomd.filter.All(),
-                                        tauS=1.0,
+                                        tauS=12.0,
+                                        # tauS=1.0,
                                         S=1.0,
-                                        thermostat=hoomd.md.methods.thermostats.Bussi(kT=1.0),
+                                        # thermostat=hoomd.md.methods.thermostats.Bussi(kT=1.0),
+                                        thermostat=hoomd.md.methods.thermostats.Bussi(kT=2.58,tau=1.0),
+                                        # thermostat=hoomd.md.methods.thermostats.MTTK(kT=1.0),
                                         couple="xyz")
 integrator.methods = [npt]
 integrator.forces = [lj,harmonic]
