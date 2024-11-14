@@ -70,7 +70,7 @@ displacement_capped = hoomd.md.methods.DisplacementCapped(filter=hoomd.filter.Al
                                                                 maximum_displacement=0.01)
 
 fire = hoomd.md.minimize.FIRE(dt=0.05,
-                            force_tol=1e-2,#3,
+                            force_tol=1e-2,
                             angmom_tol=1e-2,
                             energy_tol=1e-3)
 
@@ -83,28 +83,24 @@ gsd = hoomd.write.GSD(trigger=hoomd.trigger.Periodic(1),#0_000),
                       filename='minimize.gsd')
 sim.operations.writers.append(gsd)
 
-print("Minimize FIRE increase gaussian,harmonic")
+print("Minimize FIRE gaussian,harmonic")
 fire.forces = [harmonic,gaussian]
 
-for Q in [1,10,100,1000]:
-    print("Q=",Q)
-    gaussian.params[particle_types,particle_types]= dict(A=Q)
-    harmonic.params[bond_types] = dict(k=Q, r0=0.3)
-    while not fire.converged:
-        sim.run(100)
+gaussian.params[particle_types,particle_types]= dict(A=1)
+harmonic.params[bond_types] = dict(k=1, r0=0.3)
+while not fire.converged:
+    sim.run(100)
 
-print("Minimize FIRE increase gaussian")
-fire.forces = [gaussian,harmonic]
-
-for Q in [1e3,2e3,5e3,1e4]:
-    print("Q=",Q)
-    gaussian.params[particle_types,particle_types]= dict(A=Q)
-    while not fire.converged:
-        sim.run(100)
-
+fire.forces = []
+fire.methods = []
 print("Minimize FIRE lj, harmonic")
+fire = hoomd.md.minimize.FIRE(dt=0.05,
+                            force_tol=1e-2,
+                            angmom_tol=1e-2,
+                            energy_tol=1e-3)
 fire.forces = [lj,harmonic]
-sim.run(10000)
+fire.methods = [displacement_capped]
+sim.run(10_000)
 
 fire.forces = []
 
