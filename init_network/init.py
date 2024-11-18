@@ -106,8 +106,8 @@ def main():
     #               Second Minimization with Martini
     #-------------------------------------------------------
     print("Minimize FIRE Martini lj, harmonic")
-    lj,harmonic, harmonic_angle, cosine_sq, dihedral = init_forces(sim,cell)
-    martini_forces = [lj,harmonic,harmonic_angle,cosine_sq,dihedral]
+    lj,harmonic, harmonic_angle, cosine_sq, dihedral,table = init_forces(sim,cell)
+    martini_forces = [lj,harmonic,harmonic_angle,cosine_sq,dihedral,table]
     displacement_capped = hoomd.md.methods.DisplacementCapped(
                                         filter=hoomd.filter.All(),
                                         maximum_displacement=0.000001)
@@ -272,7 +272,7 @@ def init_forces(sim,cell):
     table.params[('SP1q','TN2q')] = dict(r_min=0.1, U=SP1qxTN2q_coulomb_interaction[0], F=SP1qxTN2q_coulomb_interaction[1])
     table.r_cut[('SP1q','TN2q')] = r_max
 
-    return lj,harmonic, harmonic_angle, cosine_sq, dihedral
+    return lj,harmonic, harmonic_angle, cosine_sq, dihedral, table
 
 def nth_particle(row_text, item_number):
     """
