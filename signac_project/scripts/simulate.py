@@ -75,9 +75,14 @@ class Simulator():
         init.create_system()
         init.save_system(self.minimize_gsd_file)
 
-        cpu = hoomd.device.CPU()
+        try:
+            device = hoomd.device.GPU()
+            print('GPU found')
+        except:
+            device = hoomd.device.CPU()
+            print('CPU found')
 
-        sim = hoomd.Simulation(device=cpu, seed=568)
+        sim = hoomd.Simulation(device=device, seed=568)
         sim.create_state_from_gsd(filename=self.minimize_gsd_file)
 
         particle_types = sim.state.particle_types
