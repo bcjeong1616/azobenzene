@@ -59,6 +59,10 @@ def isomerized(job):
 def existed(job):
     return job.isfile("exist.gsd")
 
+@MyProject.label
+def rdf_cat_an_analyzed(job):
+    return job.isfile("plots/rdf_cation_anion.pdf")
+
 # # this can be changed after some simulations are run, and if 1e5 is increased, signac will
 # # know to re-run all simulations for longer
 # @MyProject.label
@@ -107,14 +111,14 @@ def exist(job):
 #-----------
 # operations can be added/modified after the project started
 
-# @MyProject.post(cavitationAnalyzed)
-# @MyProject.pre.isfile("deform.gsd")
-# @MyProject.operation
-# def analyzeCavitation(job):
-#     from scripts.analyze import CavitationAnalyzer
-#     analyzer = CavitationAnalyzer(job.fn('deform.gsd')) #,"cavitationAnalysis")
-#     analyzer.analyzeCavitation(job)
-#     print("Cavitation analysis done for job: ",job.id)
+@MyProject.post(rdf_cat_an_analyzed)
+@MyProject.pre(existed)
+@MyProject.operation
+def analyze_cat_an_rdf(job):
+    from scripts.analyze import Analyzer
+    analyzer = Analyzer(job) #,"cavitationAnalysis")
+    analyzer.plot_rdf_cation_anion()
+    print("RDF analysis done for job: ",job.id)
 
 # #Draws data from the PPA analysis and also remaps the chain conformation
 # #   information from the first frame of ppa_out.gsd to the normal chain

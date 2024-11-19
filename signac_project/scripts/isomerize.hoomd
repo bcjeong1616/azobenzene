@@ -1,0 +1,191 @@
+import numpy as np
+import math
+import os, sys
+import hoomd
+import gsd.hoomd
+# both scripts have to be in same folder for this to work
+from random_polymerMelt_maker import RandomPolymerMaker
+import argparse
+from pathlib import Path
+import azobenzene_potentials
+sys.path.append('/home/bj21/programs/')
+from martini3 import molecules
+from martini3 import init_cell
+from martini3 import force_fields
+import datetime
+import csv
+import signac
+
+
+class Status:
+    def __init__(self, simulation):
+        self.simulation = simulation
+
+    @property
+    def seconds_remaining(self):
+        try:
+            return (
+                self.simulation.final_timestep - self.simulation.timestep
+            ) / self.simulation.tps
+        except ZeroDivisionError:
+            return 0
+
+    @property
+    def etr(self):
+        return str(datetime.timedelta(seconds=self.seconds_remaining))
+
+def main(seq,job_id):
+    project = signac.get_project()
+    for iter_job in project:
+        if job_id == iter_job.id:
+            job = iter_job
+    
+    path = "workspace/" + str(job_id) +"/"
+
+
+    input_gsd = path + 'equi.gsd'
+    #Output
+    out_string = 'iso'
+    gsd_file=str(path)+'%s.gsd'%(out_string)
+    log_file=str(path)+'%s.log'%(out_string)
+
+    #-----------------------------------------------------------------------------
+    #                              Parameterization
+    #-----------------------------------------------------------------------------
+
+    kT = job.sp["kT"]
+
+    #-----------------------------------------------------------------------
+    #                               Change angle types
+    #-----------------------------------------------------------------------
+    with gsd.hoomd.open(name=input_gsd, mode='r') as f:
+        frame = f[-1]
+        f.close()
+
+    path = input_gsd.parent.absolute()
+
+    # Find the IDs of the trans and cis isomer angles
+    transID = -1
+    cisID = -1
+    with open(str(path) + '/angles.csv', "r") as file:
+        reader = csv.reader(file)
+        for row in reader:
+            if row[1] == '30' and math.isclose(float(row[2]),3.14159265358979):
+                transID = int(row[0])
+            if row[1] == '30' and math.isclose(float(row[2]),1.047197551):
+                cisID = int(row[0])
+
+    # print(transID)
+    # print(cisID)
+    # print(frame.angles.types)
+
+    # if no cis azobenzene angle is defined in the csv,
+    if cisID == -1:
+        #add the cis azo angle definition to the csv
+        with open(str(path) + '/angles.csv', "a") as file:
+            writer = csv.writer(file, quoting=csv.QUOTE_ALL)
+            writer.writerow([len(frame.angles.types), 30, 1.047197551])
+
+    # if the cisID according to the CSV is not in the list of angle types in the gsd,
+    if not cisID in frame.angles.types:
+        #add the cis azo angle definition to the frame.angles.types
+        cisID = len(frame.angles.types)
+        frame.angles.types.append(str(len(frame.angles.types)))
+
+    # print(transID)
+    # print(cisID)
+    # print(frame.angles.types)
+
+    match job.sp["iso_scheme"]:
+        case "all":
+            frame.angles.typeid[np.where(frame.angles.typeid == transID)] = cisID
+        case _:
+            print(rf"error: unrecognized isomerization scheme, {job.sp["iso_scheme"]}")
+            exit(2)
+
+    #-----------------------------------------------------------------------
+    #                               Setup system
+    #-----------------------------------------------------------------------
+
+    try:
+        device = hoomd.device.GPU()
+    except:
+        device = hoomd.device.CPU()
+    device.notice_level = 2
+    sim = hoomd.Simulation(device=device, seed=16)
+
+    # sim.create_state_from_gsd(filename=gsd_file)
+    sim.create_state_from_snapshot(frame)
+
+    #-----------------------------------------------------------------------
+    #                               Output
+    #-----------------------------------------------------------------------
+
+    thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
+    sim.operations.computes.append(thermodynamic_properties)
+
+    logger = hoomd.logging.Logger(categories=['scalar'])
+    logger.add(sim, quantities=['timestep'])
+    logger.add(thermodynamic_properties, quantities=['kinetic_temperature','pressure','kinetic_energy','potential_energy','volume'])
+    # table_stdout = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger)
+    table_file = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger, output=open(log_file,'a'))
+    # sim.operations.writers.append(table_stdout)
+    sim.operations.writers.append(table_file)
+
+    with gsd.hoomd.open(name=gsd_file, mode='w') as f:
+        f.append(frame)
+    gsd_writer = hoomd.write.GSD(filename=gsd_file,
+                                        trigger=hoomd.trigger.Periodic(10000),
+                                        dynamic=['property','momentum','topology','attribute'],
+                                        mode='wb')
+    sim.operations.writers.append(gsd_writer)
+
+    #-----------------------------------------------------------------------
+    #                        Particle interactions
+    #-----------------------------------------------------------------------
+
+    lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid = force_fields.forces_from_gsd(
+            str(path)+'/', str(input_gsd.name)
+        )
+
+    #-----------------------------------------------------------------------
+    #                                Run
+    #-----------------------------------------------------------------------
+    # nve = hoomd.md.methods.ConstantVolume(filter=hoomd.filter.All())
+    # fire = hoomd.md.minimize.FIRE(dt=0.005,
+    #                                     force_tol=1e-2,
+    #                                     angmom_tol=1e-2,
+    #                                     energy_tol=1e-4)
+
+    # fire.methods.append(nve)
+
+    # for t0 in np.linspace(math.pi,math.pi/3,15):
+    #     # angle_forces.params[str(0)] = dict(k=100.0,t0=t0)
+    #     angle_forces.params[str(cisID)] = dict(k=100.0,t0=t0)
+    #     fire.forces = [lj,bond_harmonic,angle_forces,dihedrals]
+    #     sim.operations.integrator = fire
+    #     print(t0)
+    #     sim.run(1e4)
+    # print('fire harmonic, lj, angle done')
+
+    # fire.forces = []
+    # del fire
+
+    print("Now testing Langevin")
+    sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(),kT=kT)
+    
+    integrator = hoomd.md.Integrator(dt=0.005)
+    langevin = hoomd.md.methods.Langevin(filter=hoomd.filter.All(),kT=kT,default_gamma=0.1)
+    integrator.methods.append(langevin)
+
+
+    for t0 in np.linspace(math.pi,math.pi/3,15):
+    #     # angle_forces.params[str(0)] = dict(k=100.0,t0=t0)
+        angle_forces.params[str(cisID)]['t0'] = t0
+        integrator.forces = [lj,bond_harmonic,angle_forces,dihedrals]
+        sim.operations.integrator = integrator
+        print(t0)
+        sim.run(1e4)
+
+    hoomd.write.GSD.write(state=sim.state,mode='wb',filename=gsd_file)
+    print("writing gsd file to:",gsd_file)
