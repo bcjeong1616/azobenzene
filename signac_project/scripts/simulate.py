@@ -29,11 +29,10 @@ class Simulator():
         self.xlink_frac = job.sp['xlink_frac']
 
         # file names
-        # self.equi_gsd_file = job.fn('equi.gsd')
-        # self.polymerize_gsd_file = job.fn('polymerize.gsd')
-        # self.output_txt =job.fn('polymerize.txt')
-        # self.output_run_txt =job.fn('run.txt')
-        # self.run_gsd_file = job.fn('run.gsd')
+        self.minimize_gsd_file = job.fn('minimize.gsd')
+        self.init_gsd_file = job.fn('init.gsd')
+        self.isomerize_gsd_file = job.fn('isomerize.gsd')
+        self.exist_gsd_file = job.fn('exist.gsd')
 
     def initialize(self):
         azo_architecture = self.azo_architecture
@@ -72,12 +71,12 @@ class Simulator():
 
 
         init.create_system()
-        init.save_system(self.job.fn('minimize.gsd'))
+        init.save_system(self.minimize_gsd_file)
 
         cpu = hoomd.device.CPU()
 
         sim = hoomd.Simulation(device=cpu, seed=568)
-        sim.create_state_from_gsd(filename=self.job.fn('minimize.gsd'))
+        sim.create_state_from_gsd(filename=self.minimize_gsd_file)
 
         particle_types = sim.state.particle_types
         bond_types = sim.state.bond_types
@@ -110,7 +109,7 @@ class Simulator():
 
         gsd = hoomd.write.GSD(trigger=hoomd.trigger.Periodic(10_000),
                             mode='wb',
-                            filename=self.job.fn('minimize.gsd'))
+                            filename=self.minimize_gsd_file)
         sim.operations.writers.append(gsd)
         
         #-------------------------------------------------------
@@ -183,7 +182,7 @@ class Simulator():
         # Make sure that the last frame is printed out
         gsd = hoomd.write.GSD(trigger=hoomd.trigger.Periodic(1),
                             mode='wb',
-                            filename=self.job.fn('init.gsd'))
+                            filename=self.init_gsd_file)
         sim.operations.writers.append(gsd)
         sim.run(1)
 
@@ -203,7 +202,7 @@ class Simulator():
         #               Change the azo isomer
         #-------------------------------------------------------
         import gsd.hoomd
-        traj = gsd.hoomd.open(name=self.job.fn('init.gsd'),mode='r')
+        traj = gsd.hoomd.open(name=self.init_gsd_file,mode='r')
         frame = traj[-1]
 
         angle_types = frame.angles.types
@@ -222,7 +221,7 @@ class Simulator():
 
         gsd = hoomd.write.GSD(trigger=hoomd.trigger.Periodic(1_000),
                             mode='wb',
-                            filename=self.job.fn('isomerize.gsd'))
+                            filename=self.isomerize_gsd_file)
         sim.operations.writers.append(gsd)
 
         thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
@@ -268,9 +267,9 @@ class Simulator():
 
         sim = hoomd.Simulation(device=device, seed=568)
         if self.azo_isomer == 'trans_to_cis':
-            sim.create_state_from_gsd(filename=self.job.fn('isomerize.gsd'))
+            sim.create_state_from_gsd(filename=self.isomerize_gsd_file)
         else:
-            sim.create_state_from_gsd(filename=self.job.fn('init.gsd'))
+            sim.create_state_from_gsd(filename=self.init_gsd_file)
 
         cell = hoomd.md.nlist.Cell(buffer=0.4)
 
@@ -280,7 +279,7 @@ class Simulator():
 
         gsd = hoomd.write.GSD(trigger=hoomd.trigger.Periodic(1_000),
                             mode='wb',
-                            filename=self.job.fn('exist.gsd'))
+                            filename=self.exist_gsd_file)
         sim.operations.writers.append(gsd)
 
         thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
