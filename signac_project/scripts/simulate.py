@@ -268,7 +268,7 @@ class Simulator():
 
         sim = hoomd.Simulation(device=device, seed=568)
         if self.azo_isomer == 'trans_to_cis':
-            sim.create_state_from_gsd(filename=self.job.fn('isomerized.gsd'))
+            sim.create_state_from_gsd(filename=self.job.fn('isomerize.gsd'))
         else:
             sim.create_state_from_gsd(filename=self.job.fn('init.gsd'))
 
