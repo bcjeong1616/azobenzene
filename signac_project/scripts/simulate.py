@@ -6,9 +6,11 @@ import numpy as np
 import sys
 sys.path.insert(0,'/Users/statt/Programs/hoomd-4.8.2/')
 sys.path.insert(0,home_directory + "/updateAzplugins/hoomd-4.8.2-install/")
+sys.path.insert(0,home_directory + "/projects/updateAzplugins/hoomd-4.8.2-install/")
 import hoomd
 from hoomd import azplugins
-print(hoomd.__file__)
+print("hoomd: ", hoomd.__file__)
+print("azplugins: ",azplugins.__file__)
 
 class Simulator():
     def __init__(self,job):
