@@ -63,6 +63,10 @@ def existed(job):
 def rdf_cat_an_analyzed(job):
     return job.isfile("plots/rdf_cation_anion.pdf")
 
+@MyProject.label
+def cluster_analyzed(job):
+    return job.isfile("cluster.gsd")
+
 # # this can be changed after some simulations are run, and if 1e5 is increased, signac will
 # # know to re-run all simulations for longer
 # @MyProject.label
@@ -116,9 +120,18 @@ def exist(job):
 @MyProject.operation
 def analyze_cat_an_rdf(job):
     from scripts.analyze import Analyzer
-    analyzer = Analyzer(job) #,"cavitationAnalysis")
+    analyzer = Analyzer(job)
     analyzer.plot_rdf_cation_anion()
     print("RDF analysis done for job: ",job.id)
+
+@MyProject.post(cluster_analyzed)
+@MyProject.pre(existed)
+@MyProject.operation
+def analyze_cluster(job):
+    from scripts.analyze import Analyzer
+    analyzer = Analyzer(job)
+    analyzer.cluster_analysis()
+    print("Cluster analysis done for job: ",job.id)
 
 # #Draws data from the PPA analysis and also remaps the chain conformation
 # #   information from the first frame of ppa_out.gsd to the normal chain

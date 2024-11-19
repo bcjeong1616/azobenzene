@@ -289,3 +289,99 @@ class Analyzer():
         plt.tight_layout()
         plt.savefig(plot_file_name)
         np.savetxt(rf'{plot_file_name.replace('pdf','txt')}', np.c_[rdf.bin_centers, rdf.rdf], header="bincenter, RDF", fmt='%f')
+
+    def cluster_analysis(self):
+        '''
+        Cluster analysis of the exist.gsd file
+
+        Output:
+        - cluster.gsd: gsd file with cluster information per particle, saved in the charge field
+            -1 indicates no cluster
+            -2 indicates non-ion particle
+        - cluster.csv: csv file with timestep, number of clusters, and average cluster size
+        '''
+        from scipy.spatial import cKDTree as KDTree
+        from sklearn.cluster import DBSCAN
+
+        #Output
+        import gsd.hoomd
+        cluster_traj  = gsd.hoomd.open(name=self.job.fn('cluster.gsd'), mode='w')
+        import csv
+        with open(self.job.fn('cluster.csv'), mode='w') as cluster_file:
+            cluster_writer = csv.writer(cluster_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+            cluster_writer.writerow(['timestep','n_clusters','avg_cluster_size'])
+
+        #set up
+        period = 1
+        traj = gsd.hoomd.open(self.exist_gsd_file, 'r')
+        # find type id of "TN2q" and "SQ4n"
+        TN2q_id = traj[0].particles.types.index('TN2q')
+        SQ4n_id = traj[0].particles.types.index('SQ4n')
+
+        for i,frame in enumerate(traj):
+            if i % period != 0:
+                continue
+            # get necessary things from trajectory
+            Box = np.array([frame.configuration.box[0],frame.configuration.box[1],frame.configuration.box[2]])
+            pos = frame.particles.position + Box/2.
+            eps=1e-8
+            cutoff0=1.1 #same cutoff as the coulomb potential
+            Box = Box + np.array([eps,eps,eps])
+            ids = frame.particles.typeid
+            pos0 = pos[ids==TN2q_id] #select only charged particles
+            pos1 = pos[ids==SQ4n_id] #select only anion particles
+            pos0 = np.vstack([pos0,pos1])
+
+            tree = KDTree(data=pos0, leafsize=12,boxsize=Box)
+            pairs = tree.sparse_distance_matrix(tree,cutoff0)
+
+            # now use DBSCAN for clustering (look up on scipy webpage) on the distances of
+            # nearest neighbors we have determined by KDTree. It could calculate the distances
+            # itself but it does not know about PBC and correcting for that is very cumbersome
+
+            dbscan = DBSCAN(eps=cutoff0, min_samples=1, metric="precomputed", n_jobs=-1)
+            # this contains the main result!
+            labels0 = dbscan.fit_predict(pairs)
+
+            # a cluster has to be bigger than a single ion
+            # remove all clusters smaller than single ion
+            ls, cs = np.unique(labels0,return_counts=True)
+            dic = dict(zip(ls,cs))
+            idx = [i for i,label in enumerate(labels0) if dic[label] <2+1 and label >= 0]
+            labels0[idx]=-1
+
+
+            # we need to give every particle an id, not only ion particles
+            new_labels = np.zeros(len(pos))-2  # so other particles get -2
+            #print(new_labels,len(new_labels))
+            new_labels[np.where((ids==TN2q_id)|(ids==SQ4n_id))] = labels0
+
+            # save this information in the particle charge of the gsd
+            # Prepare for new snapshot with chain breaking information
+            new_frame = gsd.hoomd.Frame()
+            new_frame.configuration.step=frame.configuration.step
+            new_frame.configuration.box=frame.configuration.box
+            new_frame.configuration.dimensions=frame.configuration.dimensions
+            new_frame.bonds.group=frame.bonds.group
+            new_frame.bonds.typeid=frame.bonds.typeid
+            new_frame.bonds.types=frame.bonds.types
+            new_frame.bonds.N=frame.bonds.N
+            new_frame.particles.N=frame.particles.N
+            new_frame.particles.types=frame.particles.types
+            new_frame.particles.typeid=frame.particles.typeid
+            new_frame.particles.position=frame.particles.position
+            # new_frame.particles.velocity=frame.particles.velocity
+            #
+            new_frame.particles.charge=new_labels
+            #
+            cluster_traj.append(new_frame)
+
+            # number of clusters (label -1 means not in a cluster, noise)
+            n0,counts = np.unique(labels0,return_counts=True)
+            # save cluster information to csv
+            with open(self.job.fn('cluster.csv'), mode='a') as cluster_file:
+                cluster_writer = csv.writer(cluster_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                cluster_writer.writerow(
+                    [frame.configuration.step,len(n0),np.average(counts)/2])
+
+        return 
