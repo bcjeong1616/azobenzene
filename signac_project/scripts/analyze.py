@@ -288,7 +288,7 @@ class Analyzer():
 
         plt.tight_layout()
         plt.savefig(plot_file_name)
-        np.savetxt(rf'{plot_file_name.replace('pdf','txt')}', np.c_[rdf.bin_centers, rdf.rdf], header="bincenter, RDF", fmt='%f')
+        np.savetxt(rf"{plot_file_name.replace('pdf','txt')}", np.c_[rdf.bin_centers, rdf.rdf], header="bincenter, RDF", fmt='%f')
 
     def cluster_analysis(self):
         '''
@@ -317,6 +317,19 @@ class Analyzer():
         # find type id of "TN2q" and "SQ4n"
         TN2q_id = traj[0].particles.types.index('TN2q')
         SQ4n_id = traj[0].particles.types.index('SQ4n')
+        # create a mask for the center azobenzene particles based on the presence of TC5 rings
+        TC5_id = traj[0].particles.types.index('TC5')
+        ids = traj[0].particles.typeid
+        TC5_indexes = np.where(ids==TC5_id)[0]
+        reshaped_indexes = TC5_indexes.reshape(-1,6) # Reshape the array to have 6 columns
+        n_azo = reshaped_indexes.shape[0]
+        print(n_azo)
+        azo_indexes = np.mean(reshaped_indexes,axis=1)
+        # print(azo_indexes)
+        azo_mask = np.isin(range(0,traj[0].particles.N),azo_indexes)
+        print(azo_mask)
+        print(ids[azo_mask])
+        # exit()
 
         for i,frame in enumerate(traj):
             if i % period != 0:
@@ -328,11 +341,34 @@ class Analyzer():
             cutoff0=1.1 #same cutoff as the coulomb potential
             Box = Box + np.array([eps,eps,eps])
             ids = frame.particles.typeid
-            pos0 = pos[ids==TN2q_id] #select only charged particles
-            pos1 = pos[ids==SQ4n_id] #select only anion particles
-            pos0 = np.vstack([pos0,pos1])
-
-            tree = KDTree(data=pos0, leafsize=12,boxsize=Box)
+            if self.azo_architecture == 'sideChainIL':
+                pos0 = pos[azo_mask] #select only central azo particles
+                pos1 = pos[ids==TN2q_id] #select only charged cation particles
+                pos2 = pos[ids==SQ4n_id] #select only charged anion particles
+                print(np.shape(pos0))
+                print(np.shape(pos1))
+                stacked_pos = np.zeros((np.shape(pos0)[0]+np.shape(pos1)[0],3), dtype=pos0.dtype)
+                print(np.shape(stacked_pos))
+                for j in range(n_azo):
+                    stacked_pos[j*3] = pos0[j]
+                    stacked_pos[j*3+1] = pos1[j*2]
+                    stacked_pos[j*3+2] = pos1[j*2+1]
+                stacked_pos = np.vstack([stacked_pos,pos2])
+            elif self.azo_architecture == 'sideChain':
+                pos0 = pos[azo_mask] #select only central azo particles
+                pos1 = pos[ids==TN2q_id] #select only charged cation particles
+                pos2 = pos[ids==SQ4n_id] #select only charged anion particles
+                stacked_pos = np.vstack([pos0,pos1,pos2])
+            elif self.azo_architecture == 'mainChain':
+                pos0 = pos[azo_mask] #select only central azo particles
+                pos1 = pos[ids==TN2q_id] #select only charged cation particles
+                pos2 = pos[ids==SQ4n_id] #select only charged anion particles
+                stacked_pos = np.vstack([pos0,pos1,pos2])
+            else:
+                print("Invalid azo architecture")
+                exit(2)
+            
+            tree = KDTree(data=stacked_pos, leafsize=12,boxsize=Box)
             pairs = tree.sparse_distance_matrix(tree,cutoff0)
 
             # now use DBSCAN for clustering (look up on scipy webpage) on the distances of
@@ -342,6 +378,7 @@ class Analyzer():
             dbscan = DBSCAN(eps=cutoff0, min_samples=1, metric="precomputed", n_jobs=-1)
             # this contains the main result!
             labels0 = dbscan.fit_predict(pairs)
+            # print(labels0)
 
             # a cluster has to be bigger than a single ion
             # remove all clusters smaller than single ion
@@ -350,11 +387,11 @@ class Analyzer():
             idx = [i for i,label in enumerate(labels0) if dic[label] <2+1 and label >= 0]
             labels0[idx]=-1
 
-
             # we need to give every particle an id, not only ion particles
             new_labels = np.zeros(len(pos))-2  # so other particles get -2
             #print(new_labels,len(new_labels))
-            new_labels[np.where((ids==TN2q_id)|(ids==SQ4n_id))] = labels0
+            # new_labels[np.where((ids==TN2q_id)|(ids==SQ4n_id))] = labels0#|azo_mask)] = labels0
+            new_labels[np.where((ids==TN2q_id)|(ids==SQ4n_id)|azo_mask)] = labels0
 
             # save this information in the particle charge of the gsd
             # Prepare for new snapshot with chain breaking information
