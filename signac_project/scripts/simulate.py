@@ -262,7 +262,16 @@ class Simulator():
         integrator.methods = [npt]
         integrator.forces = martini_forces
         sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(),kT=2.58)
-        sim.run(10_000)
+
+        width = 1000
+        ramp = np.linspace(0,1,10)
+        for A in ramp:
+            cis_azo_FF_U, cis_azo_FF_T = li_et_al(t0=60/180*np.pi,k=A*98*4.184,
+                          C=A*-0.532,D=A*0.08,
+                          table_width=width)
+            azo_angle.params['azo_cis_isomer'] = dict(U=cis_azo_FF_U,tau=cis_azo_FF_T)
+            sim.run(1_000)
+        sim.run(9_000) # extra time to equilibrate from the sudden stress
 
     def exist(self):
         try:
@@ -325,6 +334,12 @@ class Simulator():
 #--------------------------------------------------
 #                   Force field
 #--------------------------------------------------
+def li_et_al(t0,k,C,D, table_width):
+        theta = np.linspace(0,np.pi,table_width)
+        U = 0.5*k*(theta-t0)**2*(1+C*(theta-t0)+D*(theta-t0)**2)
+        torque =  -k/2*2*(theta-t0)+k/2*3*C*(theta-t0)**2+k/2*4*D*(theta-t0)**3
+        return U,torque
+
 def init_forces(sim,cell):
     # self.particle_types = ['TC1','SN4a','SN3r','SC1','TN3r','TC5','TN2q','TC6','TC3','SX4e','SQ4n',]
     # self.bond_types = ['TC1-TC1','TC1-SN4a','SN4a-SN3r','SN3r-SN3r',
@@ -388,11 +403,6 @@ def init_forces(sim,cell):
     downselected_list = angle_type_list.copy()
     downselected_list.remove('generic')
     cosine_sq.params[downselected_list] = dict(k=0.0001,t0=np.pi)
-    def li_et_al(t0,k,C,D, table_width):
-        theta = np.linspace(0,np.pi,table_width)
-        U = 0.5*k*(theta-t0)**2*(1+C*(theta-t0)+D*(theta-t0)**2)
-        torque =  -k/2*2*(theta-t0)+k/2*3*C*(theta-t0)**2+k/2*4*D*(theta-t0)**3
-        return U,torque
     width = 1000
     trans_azo_FF_U, trans_azo_FF_T = li_et_al(t0=180/180*np.pi,k=105*4.184,
                             C=0.5,D=0.073,
