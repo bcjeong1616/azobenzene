@@ -457,6 +457,41 @@ class RandomNetworkMaker():
 
         i = len(self.types_backbones) + len(self.types_crosslinkers)
 
+        for n in range(N_to_add_EMIM):
+
+            self.types_ionic_liquid.append(self.TN2q)
+            self.types_ionic_liquid.append(self.TN2q)
+            self.types_ionic_liquid.append(self.TC3)
+            self.types_ionic_liquid.append(self.TC6)
+            self.masses.append(self.T_mass)
+            self.masses.append(self.T_mass)
+            self.masses.append(self.T_mass)
+            self.masses.append(self.T_mass)
+
+            self.bonds.append([i,i+1])
+            self.bonds_typeids.append(self.TN2q_TN2q)
+            self.bonds.append([i+1,i+2])
+            self.bonds_typeids.append(self.TN2q_TC3)
+            self.bonds.append([i,i+3])
+            self.bonds_typeids.append(self.TN2q_TC6)
+            self.bonds.append([i+1,i+3])
+            self.bonds_typeids.append(self.TN2q_TC6)
+
+            self.angles.append([i,i+1,i+2])
+            self.angles_typeids.append(self.EMIM_angle_typeid)
+            self.angles.append([i+3,i+1,i+2])
+            self.angles_typeids.append(self.EMIM_angle_typeid)
+
+            q = self.random_FRC(4,0.2,1.0)
+            com = np.random.uniform(-self.L/2.0,self.L/2.0,3)
+            pos = com + q
+
+            for j,pi in enumerate(pos):
+                p_wrap =self.wrap_pbc(pi,np.array([self.L,self.L,self.L]))
+                self.positions_ionic_liquid.append(p_wrap)
+
+            i = i + 4
+
         for n in range(N_to_add_TFSI):
 
             self.types_ionic_liquid.append(self.SX4e)
@@ -482,42 +517,6 @@ class RandomNetworkMaker():
 
             self.dihedrals.append([i,i+1,i+2,i+3])
             self.dihedrals_typeids.append(self.TFSI_dihedral_typeid)
-
-            q = self.random_FRC(4,0.2,1.0)
-            com = np.random.uniform(-self.L/2.0,self.L/2.0,3)
-            pos = com + q
-
-            for j,pi in enumerate(pos):
-                p_wrap =self.wrap_pbc(pi,np.array([self.L,self.L,self.L]))
-                self.positions_ionic_liquid.append(p_wrap)
-
-            i = i + 4
-
-
-        for n in range(N_to_add_EMIM):
-
-            self.types_ionic_liquid.append(self.TN2q)
-            self.types_ionic_liquid.append(self.TN2q)
-            self.types_ionic_liquid.append(self.TC3)
-            self.types_ionic_liquid.append(self.TC6)
-            self.masses.append(self.T_mass)
-            self.masses.append(self.T_mass)
-            self.masses.append(self.T_mass)
-            self.masses.append(self.T_mass)
-
-            self.bonds.append([i,i+1])
-            self.bonds_typeids.append(self.TN2q_TN2q)
-            self.bonds.append([i+1,i+2])
-            self.bonds_typeids.append(self.TN2q_TC3)
-            self.bonds.append([i,i+3])
-            self.bonds_typeids.append(self.TN2q_TC6)
-            self.bonds.append([i+1,i+3])
-            self.bonds_typeids.append(self.TN2q_TC6)
-
-            self.angles.append([i,i+1,i+2])
-            self.angles_typeids.append(self.EMIM_angle_typeid)
-            self.angles.append([i+3,i+1,i+2])
-            self.angles_typeids.append(self.EMIM_angle_typeid)
 
             q = self.random_FRC(4,0.2,1.0)
             com = np.random.uniform(-self.L/2.0,self.L/2.0,3)
