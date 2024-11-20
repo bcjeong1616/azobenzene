@@ -1,0 +1,1 @@
+{"replica_index": 0, "volume_fraction": 0.55, "kT": 2.4789570301529995, "P": 0.06101934127619658, "num_backbone": 20, "length_backbone": 100, "chain_frac_Azo": 0.05, "azo_architecture": "sideChain", "azo_isomer": "trans_to_cis", "isomerization_scheme": "all", "mol_frac_IL": 0.05, "xlink_frac": 0.05, "n_spacers": 2}

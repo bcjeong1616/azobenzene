@@ -1,0 +1,196 @@
+import numpy as np
+import sys
+sys.path.append('/home/bj21/programs/')
+from martini3 import molecules
+from martini3 import init_cell
+from martini3 import polymers_bj
+import hoomd
+import os
+import signac
+
+class DPDStrengthRamp(hoomd.custom.Action):
+
+    def __init__(self, dpd, A, B, t_start, t_ramp):
+        super().__init__()
+        self.dpd = dpd
+        self.A = A
+        self.B = B
+        self.t_start = t_start
+        self.t_ramp = t_ramp
+
+    def attach(self, simulation):
+        super().attach(simulation)
+        snapshot = self._state.get_snapshot()
+        self.particle_types = snapshot.particles.types
+
+    def act(self, timestep):
+        if timestep < self.t_start:
+            self.dpd.params[(self.particle_types,self.particle_types)] = dict(A=self.A, gamma=4.5)
+            return
+        if timestep > self.t_start+self.t_ramp:
+            self.dpd.params[(self.particle_types,self.particle_types)] = dict(A=self.B, gamma=4.5)
+            return
+        A = (self.B-self.A)/self.t_ramp * (timestep - self.t_start) + self.A
+        self.dpd.params[(self.particle_types,self.particle_types)] = dict(A=A, gamma=4.5)
+
+
+def gen_grid(low_bound, up_bound, num_spaces=100):
+    grid = []
+    x_arr = np.linspace(low_bound, up_bound, num_spaces)
+    for x in x_arr:
+        for y in x_arr:
+            grid.append((x, y))
+    return grid
+
+
+def main(seq,job_id,name_a,name_b):
+    project = signac.get_project()
+    for iter_job in project:
+        if job_id == iter_job.id:
+            job = iter_job
+    
+    path = "workspace/" + str(job_id) +"/"
+    # if not os.path.exists(path):
+    #     os.makedirs(path)
+    # contents setup
+    contents = molecules.Contents()
+    Lx = 50
+    Ly = 50
+    Lz = 50
+
+    num_polymers = 2000
+    
+    polym_placed = 0
+    num_molecule_beads = 0
+    while polym_placed < num_polymers:
+        polym_percent = polym_placed / num_polymers
+        
+        rand_pos = np.zeros(3)
+        rand_pos[0] = np.random.uniform(-Lx/2., Lx/2.)
+        rand_pos[1] = np.random.uniform(-Ly/2., Ly/2.)
+        rand_pos[2] = np.random.uniform(-Lz/2., Lz/2.)
+
+        polymer = polymers_bj.Polymer(
+            contents=contents,
+            monomer_name_list=[name_a,name_b],
+            sequence=seq,
+        )
+        polymer.shift_positions(rand_pos[0],rand_pos[1],rand_pos[2])
+        contents.add_molecule(polymer)
+        polym_placed += 1
+
+    lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid,dpd = init_cell.init_cell(
+        contents, path, box_size=[Lx, Ly, Lz], pair_on=True, return_dpd=True
+    )
+    # init cell also saves the gsd
+
+    # fire minimization to remove overlaps
+    try:
+        device = hoomd.device.GPU(notice_level=4)
+    except:
+        device = hoomd.device.CPU(notice_level=4)
+
+    sim = hoomd.Simulation(device=device, seed=1)
+    sim.create_state_from_gsd(filename=path + "init.gsd")
+    sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(), kT=0.1)
+
+    gsd_writer = hoomd.write.GSD(filename=path + 'testfire.gsd',
+                                    trigger=hoomd.trigger.Periodic(100),
+                                    dynamic=['property','momentum','topology','attribute'],
+                                    mode='wb')
+    sim.operations.writers.append(gsd_writer)
+
+    logger = hoomd.logging.Logger(categories=['scalar','string'])
+    thermo = hoomd.md.compute.ThermodynamicQuantities(hoomd.filter.All())
+    # logger.add(thermo, ['kinetic_energy', 'potential_energy'])
+    # logger.add(obj=lj, quantities=['energy'])
+    logger.add(obj=bond_harmonic, quantities=['energy'])
+    # logger.add(obj=angle_forces, quantities=['energy'])
+    # logger.add(obj=dihedrals, quantities=['energy'])
+    log_writer = hoomd.write.Table(output=open(path + 'testfire.log','w'),
+                                    trigger=hoomd.trigger.Periodic(1),
+                                    logger=logger,)
+    sim.operations.writers.append(log_writer)
+
+    fire = hoomd.md.minimize.FIRE(dt=0.05,
+                                force_tol=1e-2,
+                                angmom_tol=1e-2,
+                                energy_tol=1e-4)
+    nve = hoomd.md.methods.ConstantVolume(filter=hoomd.filter.All())
+    fire.methods = [nve]
+    fire.forces = [dpd,bond_harmonic]
+    sim.operations.integrator = fire
+
+    dpd_strength_modifier = DPDStrengthRamp(dpd=dpd,A=20,B=500,t_start=500,t_ramp=1500)
+    dpd_strength_updater = hoomd.update.CustomUpdater(
+        trigger=hoomd.trigger.Periodic(10), action=dpd_strength_modifier)
+    sim.operations.updaters.append(dpd_strength_updater)
+    sim.run(1000)
+
+    fire.forces = [dpd,bond_harmonic,angle_forces]
+    sim.run(100)
+
+    fire.forces = [dpd,bond_harmonic,angle_forces,dihedrals]
+    sim.run(100)
+
+    # fire.dt = 0.005#0.02
+    displacement_capped = hoomd.md.methods.DisplacementCapped(
+                filter=hoomd.filter.All(),
+                maximum_displacement=hoomd.variant.Power(A=0.005, B=0.02, power=10, t_start=100, t_ramp=500))
+    fire.methods = [displacement_capped]
+    fire.forces = [lj,bond_harmonic]#,angle_forces,dihedrals]
+    sim.run(100)
+
+    fire.forces = []
+    del fire
+
+    print("Simulation initialized, starting equilibration...")
+
+    dt = 0.02
+    integrator = hoomd.md.Integrator(dt=dt)
+
+    # Nose-Hoover
+    #nvt = hoomd.md.methods.ConstantVolume(filter=types_to_integrate,
+    #    thermostat=hoomd.md.methods.thermostats.MTTK(kT=kT,tau=0.005*100))
+    #integrator.methods.append(nvt)
+    kT = job.sp["kT"]
+    langevin = hoomd.md.methods.Langevin(filter=hoomd.filter.All(),kT=kT,default_gamma=0.1)
+
+    integrator.methods.append(langevin)
+    
+    # integrator.forces = [lj,bond_harmonic,angle_forces,dihedrals,improper,rigid,coulomb]
+    integrator.forces = [lj,bond_harmonic,angle_forces,dihedrals]
+    # integrator.forces = [lj,angle_forces,dihedrals]
+
+    sim.operations.integrator = integrator
+    sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(), kT=kT)
+
+    gsd_writer = hoomd.write.GSD(filename=path + 'testequi.gsd',
+                                    trigger=hoomd.trigger.Periodic(100),
+                                    dynamic=['property','momentum','topology','attribute'],
+                                    mode='wb')
+    sim.operations.writers.append(gsd_writer)
+
+    sim.run(1000)
+    # hoomd.write.GSD.write(state=sim.state, mode='wb', filename=path + "equi.gsd")
+
+    mttk = hoomd.md.methods.thermostats.MTTK(kT=kT,tau=100*dt)
+    npt = hoomd.md.methods.ConstantPressure(filter=hoomd.filter.All(),S=job.sp["P"],
+                                        tauS=1000*dt, couple="none",thermostat=mttk,)
+    integrator.methods = [npt]
+
+    sim.run(5000)
+
+    print("writing gsd file to: ",path + "equi.gsd")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Usage: python3 init.py sequence job_id name_a name_b")
+        sys.exit(1)
+    # import csv
+    # file_name = "seq_id.csv"
+    # with open(file_name,'a') as csvfile:
+    #     writer = csv.writer(csvfile)
+    #     writer.writerow([str(sys.argv[3]),str(sys.argv[4]),str(sys.argv[1]),str(sys.argv[2])])
+    main(str(sys.argv[1]), str(sys.argv[2]),str(sys.argv[3]),str(sys.argv[4]))

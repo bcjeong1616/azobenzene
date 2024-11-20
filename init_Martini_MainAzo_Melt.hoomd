@@ -1,0 +1,315 @@
+import numpy as np
+import sys
+sys.path.append('/home/bj21/programs/')
+from martini3 import molecules
+from martini3 import init_cell
+from martini3 import polymers_bj
+import hoomd
+import os
+
+class DPDStrengthRamp(hoomd.custom.Action):
+
+    def __init__(self, dpd, A, B, t_start, t_ramp):
+        super().__init__()
+        self.dpd = dpd
+        self.A = A
+        self.B = B
+        self.t_start = t_start
+        self.t_ramp = t_ramp
+
+    def attach(self, simulation):
+        super().attach(simulation)
+        snapshot = self._state.get_snapshot()
+        self.particle_types = snapshot.particles.types
+
+    def act(self, timestep):
+        if timestep < self.t_start:
+            self.dpd.params[(self.particle_types,self.particle_types)] = dict(A=self.A, gamma=4.5)
+            return
+        if timestep > self.t_start+self.t_ramp:
+            self.dpd.params[(self.particle_types,self.particle_types)] = dict(A=self.B, gamma=4.5)
+            return
+        A = (self.B-self.A)/self.t_ramp * (timestep - self.t_start) + self.A
+        self.dpd.params[(self.particle_types,self.particle_types)] = dict(A=A, gamma=4.5)
+'''
+class AzoBondStrengthRamp(hoomd.custom.Action):
+    def __init__(self, bond_harmonic, A, B, t_start, t_ramp):
+        super().__init__()
+        self.bond_harmonic = bond_harmonic
+        self.A = A
+        self.B = B
+        self.t_start = t_start
+        self.t_ramp = t_ramp
+
+    def attach(self, simulation):
+        super().attach(simulation)
+        snapshot = self._state.get_snapshot()
+        self.bond_types = snapshot.bonds.types
+        for bond_type in self.bond_types:
+            if self.bond_harmonic.params[bond_type].get('k') == 6999:
+                self.AzoBondKey = bond_type
+                self.AzoBondKey_r0 = self.bond_harmonic.params[bond_type].get('r0')
+                return
+
+    def act(self, timestep):
+        if timestep < self.t_start:
+            self.bond_harmonic.params[self.AzoBondKey] = dict(k=self.A, r0=self.AzoBondKey_r0)
+            return
+        if timestep > self.t_start+self.t_ramp:
+            self.bond_harmonic.params[self.AzoBondKey] = dict(k=self.B, r0=self.AzoBondKey_r0)
+            return
+        A = (self.B-self.A)/self.t_ramp * (timestep - self.t_start) + self.A
+        self.bond_harmonic.params[self.AzoBondKey] = dict(k=A, r0=self.AzoBondKey_r0)
+'''
+
+def gen_grid(low_bound, up_bound, num_spaces=100):
+    grid = []
+    x_arr = np.linspace(low_bound, up_bound, num_spaces)
+    for x in x_arr:
+        for y in x_arr:
+            grid.append((x, y))
+    return grid
+
+
+def main(seq,id,name_a,name_b):
+
+    path = "data/" + str(id) +"/"
+    if not os.path.exists(path):
+        os.makedirs(path)
+    # contents setup
+    contents = molecules.Contents()
+    Lx = 15
+    Ly = 15
+    Lz = 15
+    num_polymers = 200
+    polym_placed = 0
+
+    num_molecule_beads = 0
+    while polym_placed < num_polymers:
+        # 1. generate a coordinate and rotation
+        # 2. pick if we want to place polym or lipid
+        # 3. attempt to place and compare distance
+        # 4. if placed, add position to list
+        polym_percent = polym_placed / num_polymers
+        
+        # rand_pos = np.zeros((num_polymers,3))
+        # rand_pos[:,0] = np.random.uniform(-Lx/2., Lx/2.)
+        # rand_pos[:,1] = np.random.uniform(-Ly/2., Ly/2.)
+        # rand_pos[:,2] = np.random.uniform(-Lz/2., Lz/2.)
+        rand_pos = np.zeros(3)
+        rand_pos[0] = np.random.uniform(-Lx/2., Lx/2.)
+        rand_pos[1] = np.random.uniform(-Ly/2., Ly/2.)
+        rand_pos[2] = np.random.uniform(-Lz/2., Lz/2.)
+
+        polymer = polymers_bj.Polymer(
+            contents=contents,
+            monomer_name_list=[name_a,name_b],
+            sequence=seq,
+        )
+        polymer.shift_positions(rand_pos[0],rand_pos[1],rand_pos[2])
+        # contents.add_molecule_bj(polymer)
+        contents.add_molecule(polymer)
+        polym_placed += 1
+
+    lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid,dpd = init_cell.init_cell(
+        contents, path, box_size=[Lx, Ly, Lz], pair_on=True, return_dpd=True
+    )
+    # init cell also saves the gsd
+
+    # fire minimization to remove overlaps
+    try:
+        device = hoomd.device.GPU(notice_level=4)
+    except:
+        device = hoomd.device.CPU(notice_level=4)
+
+    sim = hoomd.Simulation(device=device, seed=1)
+    sim.create_state_from_gsd(filename=path + "init.gsd")
+    sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(), kT=0.1)
+
+    gsd_writer = hoomd.write.GSD(filename=path + 'testfire.gsd',
+                                    trigger=hoomd.trigger.Periodic(1),
+                                    dynamic=['property','momentum','topology','attribute'],
+                                    mode='wb')
+    sim.operations.writers.append(gsd_writer)
+
+    logger = hoomd.logging.Logger(categories=['scalar','string'])
+    thermo = hoomd.md.compute.ThermodynamicQuantities(hoomd.filter.All())
+    log_writer = hoomd.write.Table(output=open(path + 'testfire.log','w'),
+                                    trigger=hoomd.trigger.Periodic(1),
+                                    logger=logger,)
+    sim.operations.writers.append(log_writer)
+
+
+    '''
+    fire = hoomd.md.minimize.FIRE(dt=0.05,
+                                force_tol=1e-2,
+                                angmom_tol=1e-2,
+                                energy_tol=1e-4)
+    nve = hoomd.md.methods.ConstantVolume(filter=hoomd.filter.All())
+    fire.methods = [nve]
+    fire.forces = [dpd,bond_harmonic]
+    sim.operations.integrator = fire
+    
+    dpd_strength_modifier = DPDStrengthRamp(dpd=dpd,A=20,B=500,t_start=500,t_ramp=1500)
+    dpd_strength_updater = hoomd.update.CustomUpdater(
+        trigger=hoomd.trigger.Periodic(10), action=dpd_strength_modifier)
+    sim.operations.updaters.append(dpd_strength_updater)
+    sim.run(1000)
+
+    fire.forces = [dpd,bond_harmonic,angle_forces]
+    sim.run(100)
+
+    fire.forces = [dpd,bond_harmonic,angle_forces,dihedrals]
+    sim.run(100)
+
+    # fire.dt = 0.005#0.02
+    displacement_capped = hoomd.md.methods.DisplacementCapped(
+                filter=hoomd.filter.All(),
+                maximum_displacement=hoomd.variant.Power(A=0.005, B=0.02, power=10, t_start=100, t_ramp=500))
+    fire.methods = [displacement_capped]
+    fire.forces = [lj,bond_harmonic]#,angle_forces,dihedrals]
+    sim.run(100)
+
+    fire.forces = []
+    del fire
+    '''
+    fire = hoomd.md.minimize.FIRE(dt=0.05,
+                                force_tol=1e-2,
+                                angmom_tol=1e-2,
+                                energy_tol=1e-4)
+    nve = hoomd.md.methods.ConstantVolume(filter=hoomd.filter.All())
+    fire.methods = [nve]
+    fire.forces = [dpd,bond_harmonic]
+    sim.operations.integrator = fire
+    for force in fire.forces:
+        print(force)
+        print(force.params)
+        for type_pair in force.params:
+            print(type_pair)
+            print(force.params[type_pair])
+    # logger.add(obj=lj, quantities=['energy'])
+    logger.add(obj=dpd,quantities=['energy'])
+    logger.add(obj=bond_harmonic, quantities=['energy'])
+    # logger.add(obj=angle_forces, quantities=['energy'])
+    # logger.add(obj=dihedrals, quantities=['energy'])
+    sim.run(100)
+    
+    '''
+    azobond_strength_modifier = AzoBondStrengthRamp(bond_harmonic=bond_harmonic,A=7000,B=30000,t_start=100,t_ramp=300)
+    azobond_strength_updater = hoomd.update.CustomUpdater(
+        trigger=hoomd.trigger.Periodic(10), action=azobond_strength_modifier)
+    sim.operations.updaters.append(azobond_strength_updater)
+    sim.run(200)
+    '''
+
+    fire.forces = [dpd,bond_harmonic,angle_forces]
+    for force in fire.forces:
+        print(force)
+        print(force.params)
+        for type_pair in force.params:
+            print(type_pair)
+            print(force.params[type_pair])
+    logger.add(obj=angle_forces, quantities=['energy'])
+    # logger.add(obj=dihedrals, quantities=['energy'])
+    sim.run(100)
+
+    fire.forces = [dpd,bond_harmonic,angle_forces,dihedrals]
+    for force in fire.forces:
+        print(force)
+        print(force.params)
+        for type_pair in force.params:
+            print(type_pair)
+            print(force.params[type_pair])
+    logger.add(obj=dihedrals, quantities=['energy'])
+    sim.run(100)
+
+    dpd_strength_modifier = DPDStrengthRamp(dpd=dpd,A=20,B=500,t_start=300,t_ramp=1300)
+    dpd_strength_updater = hoomd.update.CustomUpdater(
+        trigger=hoomd.trigger.Periodic(10), action=dpd_strength_modifier)
+    sim.operations.updaters.append(dpd_strength_updater)
+    for force in fire.forces:
+        print(force)
+        print(force.params)
+        for type_pair in force.params:
+            print(type_pair)
+            print(force.params[type_pair])
+    sim.run(1000)
+
+
+    # fire.dt = 0.005#0.02
+    # displacement_capped = hoomd.md.methods.DisplacementCapped(
+    #             filter=hoomd.filter.All(),
+    #             maximum_displacement=0.0002)
+    #             # maximum_displacement=hoomd.variant.Power(A=0.005, B=0.02, power=10, t_start=100, t_ramp=500))
+    # fire.methods = [displacement_capped]
+    fire.dt = 0.001
+    fire.forces = [lj,bond_harmonic,angle_forces,dihedrals]
+    for force in fire.forces:
+        print(force)
+        print(force.params)
+        for type_pair in force.params:
+            print(type_pair)
+            print(force.params[type_pair])
+    logger.remove(obj=dpd, quantities=['energy'])
+    logger.add(obj=lj, quantities=['energy'])
+    sim.run(300)
+
+
+    fire.forces = []
+    del fire
+
+    print("Simulation initialized, starting equilibration...")
+    dt = 0.02
+    integrator = hoomd.md.Integrator(dt=dt)
+
+    # Nose-Hoover
+    #nvt = hoomd.md.methods.ConstantVolume(filter=types_to_integrate,
+    #    thermostat=hoomd.md.methods.thermostats.MTTK(kT=kT,tau=0.005*100))
+    #integrator.methods.append(nvt)
+    kT = 0.00831446262*298.15
+    langevin = hoomd.md.methods.Langevin(filter=hoomd.filter.All(),kT=kT,default_gamma=0.1)
+
+    integrator.methods.append(langevin)
+    
+    # integrator.forces = [lj,bond_harmonic,angle_forces,dihedrals,improper,rigid,coulomb]
+    # integrator.forces = [lj,bond_harmonic,angle_forces,dihedrals]
+    integrator.forces = [lj,bond_harmonic,angle_forces]
+    logger.remove(obj=dihedrals, quantities=['energy'])
+
+    sim.operations.integrator = integrator
+    sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(), kT=0)
+
+    sim.operations.writers.remove(gsd_writer)
+    gsd_writer = hoomd.write.GSD(filename=path + 'testequi.gsd',
+                                    trigger=hoomd.trigger.Periodic(1000),
+                                    dynamic=['property','momentum','topology','attribute'],
+                                    mode='wb')
+    sim.operations.writers.append(gsd_writer)
+
+
+    # sim.run(5000)
+
+    sim.run(1000)
+    # hoomd.write.GSD.write(state=sim.state, mode='wb', filename=path + "equi.gsd")
+
+    mttk = hoomd.md.methods.thermostats.MTTK(kT=kT,tau=100*dt)
+    npt = hoomd.md.methods.ConstantPressure(filter=hoomd.filter.All(),S=1/16,
+                                        tauS=1000*dt, couple="none",thermostat=mttk,)
+    integrator.methods = [npt]
+
+    sim.run(50000)
+
+    # hoomd.write.GSD.write(state=sim.state, mode='wb', filename=path + "equi.gsd")
+    print("writing gsd file to: ",path + "equi.gsd")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Usage: python3 init.py sequence id name_a name_b")
+        sys.exit(1)
+    import csv
+    file_name = "seq_id.csv"
+    with open(file_name,'a') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([str(sys.argv[3]),str(sys.argv[4]),str(sys.argv[1]),str(sys.argv[2])])
+    main(str(sys.argv[1]), str(sys.argv[2]),str(sys.argv[3]),str(sys.argv[4]))

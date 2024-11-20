@@ -1,0 +1,175 @@
+import numpy as np
+import math
+import os, sys
+import hoomd
+import gsd.hoomd
+import argparse
+from pathlib import Path
+sys.path.append('/home/bj21/programs/')
+import datetime
+
+class Status:
+    def __init__(self, simulation):
+        self.simulation = simulation
+
+    @property
+    def seconds_remaining(self):
+        try:
+            return (
+                self.simulation.final_timestep - self.simulation.timestep
+            ) / self.simulation.tps
+        except ZeroDivisionError:
+            return 0
+
+    @property
+    def etr(self):
+        return str(datetime.timedelta(seconds=self.seconds_remaining))
+
+# script_path = Path(os.path.abspath(__file__))
+# script_parent_path = script_path.parent.absolute()
+
+# print(script_parent_path)
+
+parser = argparse.ArgumentParser(description='Equilibrates an azobenzene system simulation using \
+                                 the Martini Model')
+
+non_opt = parser.add_argument_group('mandatory arguments')
+
+non_opt.add_argument('-i','--in', metavar='<gsd-file>',dest ='input_file', type=str,
+                required = True, help = 'input trajectory *.gsd file')
+
+# non_opt.add_argument('-AA','--AAmax', metavar='<int>',dest ='AAmax', type=int,
+#                 required = True, help = 'Maximum DPD parameter to try for like interactions')
+
+# non_opt.add_argument('-AB','--ABmax', metavar='<int>',dest ='ABmax', type=int,
+#                 required = True, help = 'Maximum DPD parameter to try for unlike interactions')
+
+opt = parser.add_argument_group('optional arguments')
+opt.add_argument('-o','--out', metavar='<gsd-file>',dest ='output_file', type=str,
+                required = False, help = 'output trajectory *.gsd file')
+opt.add_argument('-f','--frame', metavar='<int>',dest ='frame_start', type=int,
+                required = False, help = 'frame of the input trajectory to start from. \
+                If not given, assumes -1')
+opt.add_argument('-kT','--kT', metavar='<float>',dest ='kT', type=float,
+                required = False, help ='temperature for the system to be equilibrated \
+                at, in units of kT. If not given, assumes 1 kT')
+
+args = parser.parse_args()
+input_gsd = Path(args.input_file)
+path = input_gsd.parent.absolute()
+
+if (args.frame_start):
+    frame_start = args.frame_start
+else:
+    frame_start = -1
+
+if (args.output_file):
+    output_file = args.output_file
+else:
+    if (args.input_file.rfind('/') != -1):
+        output_file = f"eq_{args.input_file[(args.input_file.rfind('/')+1):]}"
+    else:
+        output_file = f"eq_{args.input_file}"
+output_file = str(path) + '/' + output_file
+
+#Output
+if not os.path.exists("./eq/"):
+    os.makedirs("./eq/")
+out_string = output_file.replace('.gsd','')
+gsd_file='%s.gsd'%(out_string)
+log_file='%s.log'%(out_string)
+
+#-----------------------------------------------------------------------
+#                               Setup system
+#-----------------------------------------------------------------------
+dt = 0.005
+
+try:
+    device = hoomd.device.GPU()
+except:
+    device = hoomd.device.CPU()
+device.notice_level = 2
+sim = hoomd.Simulation(device=device, seed=16)
+sim.create_state_from_gsd(filename=args.input_file,frame=frame_start)
+
+integrator = hoomd.md.Integrator(dt=dt)
+
+#-----------------------------------------------------------------------
+#                               Output
+#-----------------------------------------------------------------------
+
+status = Status(sim)
+
+thermodynamic_properties = hoomd.md.compute.ThermodynamicQuantities(filter=hoomd.filter.All())
+sim.operations.computes.append(thermodynamic_properties)
+
+logger = hoomd.logging.Logger(categories=['scalar','string'])
+logger[("Status", "etr")] = (status, "etr", "string")
+logger.add(sim, quantities=['timestep'])
+logger.add(thermodynamic_properties, quantities=['kinetic_temperature','pressure','kinetic_energy','potential_energy','volume'])
+# table_stdout = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger)
+table_file = hoomd.write.Table(trigger=hoomd.trigger.Periodic(1000),logger=logger, output=open(log_file,'a'))
+# sim.operations.writers.append(table_stdout)
+sim.operations.writers.append(table_file)
+
+# with gsd.hoomd.open(name=gsd_file, mode='w') as f:
+#     f.append(frame)
+gsd_writer = hoomd.write.GSD(filename=gsd_file,
+                                    trigger=hoomd.trigger.Periodic(1000),
+                                    dynamic=['property','momentum','topology','attribute'],
+                                    mode='wb')
+sim.operations.writers.append(gsd_writer)
+
+#-----------------------------------------------------------------------
+#                        Particle interactions
+#-----------------------------------------------------------------------
+
+lj, coulomb, bond_harmonic, angle_forces, dihedrals,improper,rigid = force_fields.forces_from_gsd(
+        str(path)+'/', str(input_gsd.name)
+    )
+
+#Short range coulombic interactions for ionic liquids
+with gsd.hoomd.open(args.input_file) as trajectory:
+    frame = trajectory[frame_start]
+r_min = 2 # TODO determine according to the relative dielectric constant and Bjerrum length of the system
+def coulomb_interaction(r, rmin, rmax, q1, q2, eps_r, eps_0):
+    V = 1./(4.*np.pi*eps_0*eps_r) * (q1*q2/r) - 1./(4.*np.pi*eps_0*eps_r) * (q1*q2/rmax)
+    F =  1./(4.*np.pi*eps_0*eps_r) * (q1*q2/r**2)
+    return V,F
+coulomb = hoomd.md.pair.Table()
+coulomb.params[(frame.particles.types,frame.particles.types)] = dict(r_min=0, U=[0], F=[0])
+coulomb.r_cut[(frame.particles.types,frame.particles.types)] = 0
+#TN2q = imidazolium partial cation S
+coulomb.params[(,)] = dict(r_min=r_min)
+
+integrator.forces = [lj,bond_harmonic,angle_forces]
+
+#---------------------------Particle Masses-----------------------------
+
+
+#-----------------------------------------------------------------------
+#                                Ensemble
+#-----------------------------------------------------------------------
+P = 0.0610193413
+tau = dt*100
+if args.kT == None:
+    kT = 1
+else:
+    kT = args.kT
+
+npt = hoomd.md.methods.ConstantPressure(filter=hoomd.filter.All(),S=P,
+                                        tauS=1000*dt,couple="xyz",
+                                        thermostat=hoomd.md.methods.thermostats.MTTK(kT=kT,tau=tau))
+
+integrator.methods.append(npt)
+
+#-----------------------------------------------------------------------
+#                                Run
+#-----------------------------------------------------------------------
+
+sim.operations.integrator = integrator
+
+sim.run(5e5+1)
+
+# hoomd.write.GSD.write(state=sim.state,mode='wb',filename=gsd_file)
+# print("writing gsd file to:",gsd_file)
