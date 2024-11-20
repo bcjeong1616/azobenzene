@@ -46,18 +46,18 @@ class CampusCluster(flow.environment.DefaultSlurmEnvironment):
 
 @MyProject.label
 def initialized(job):
-    return job.isfile("init.gsd")
+    return job.isfile("init.gsd") and os.path.getsize(job.fn("init.gsd")) > 10000
 
 @MyProject.label
 def isomerized(job):
     if job.sp["azo_isomer"] == 'trans_to_cis':
-        return job.isfile("isomerize.gsd")
+        return job.isfile("isomerize.gsd") and os.path.getsize(job.fn("isomerize.gsd")) > 10000
     else:
-        return job.isfile("init.gsd")
+        return job.isfile("init.gsd") and os.path.getsize(job.fn("init.gsd")) > 10000
 
 @MyProject.label
 def existed(job):
-    return job.isfile("exist.gsd")
+    return job.isfile("exist.gsd") and os.path.getsize(job.fn("exist.gsd")) > 10000 
 
 @MyProject.label
 def rdf_cat_an_analyzed(job):

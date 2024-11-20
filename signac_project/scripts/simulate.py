@@ -329,7 +329,8 @@ class Simulator():
         integrator.methods = [npt]
         integrator.forces = martini_forces
         sim.state.thermalize_particle_momenta(filter=hoomd.filter.All(),kT=2.58)
-        sim.run(100_000)
+        sim.run(1_000_000)
+        self.job.doc['exist_step'] = int(self.job.doc['exist_step']) + 1_000_000
 
 #--------------------------------------------------
 #                   Force field

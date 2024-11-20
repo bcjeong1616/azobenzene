@@ -268,7 +268,7 @@ class Analyzer():
         # ------------------ Create and plot the data --------------
         rdf, normalization = intermolecular_rdf(
             gsdfile=self.job.fn('exist.gsd'), A_name='SQ4n', B_name='TN2q', r_max=rmax,
-            exclude_bonded=False, bins=nbins, r_min=rmin, start=-20
+            exclude_bonded=False, bins=nbins, r_min=rmin, start=0,
             # exclude_bonded=True, bins=nbins, r_min=rmin, start=-20
         )
         ax.plot(rdf.bin_centers, rdf.rdf * normalization, linewidth=2)
@@ -345,10 +345,10 @@ class Analyzer():
                 pos0 = pos[azo_mask] #select only central azo particles
                 pos1 = pos[ids==TN2q_id] #select only charged cation particles
                 pos2 = pos[ids==SQ4n_id] #select only charged anion particles
-                print(np.shape(pos0))
-                print(np.shape(pos1))
+                # print(np.shape(pos0))
+                # print(np.shape(pos1))
                 stacked_pos = np.zeros((np.shape(pos0)[0]+np.shape(pos1)[0],3), dtype=pos0.dtype)
-                print(np.shape(stacked_pos))
+                # print(np.shape(stacked_pos))
                 for j in range(n_azo):
                     stacked_pos[j*3] = pos0[j]
                     stacked_pos[j*3+1] = pos1[j*2]
